@@ -12,6 +12,119 @@ local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+-- ============================================================
+-- PARVUS UI FRAMEWORK INITIALIZATION (FIRST)
+-- ============================================================
+
+local Window = Parvus.Utilities.UI:Window({
+    Name = ("Parvus Hub %s %s"):format(utf8.char(8212), Parvus.Game.Name),
+    Position = UDim2.new(0.5, -173 * 3, 0.5, -173), 
+    Size = UDim2.new(0, 346, 0, 346)
+}) do
+
+    local VisualsSection = Parvus.Utilities:ESPSection(Window, "Tank ESP", "ESP/Tank", true, true, false, false, true, false) do
+        VisualsSection:Toggle({
+            Name = "Tank ESP Enabled", 
+            Flag = "ESP/Tank/Enabled", 
+            Value = true,
+            Callback = function(Bool)
+                if not Bool then
+                    for tank, _ in pairs(tankHighlights) do
+                        clearTankHighlights(tank)
+                        clearBox(tank)
+                    end
+                else
+                    applyAllESP()
+                end
+            end
+        })
+        
+        VisualsSection:Toggle({
+            Name = "3D Box ESP", 
+            Flag = "ESP/Tank/Box", 
+            Value = true,
+            Callback = function(Bool)
+                if not Bool then
+                    for tank, folder in pairs(boxContainers) do
+                        clearBox(tank)
+                    end
+                else
+                    applyAllESP()
+                end
+            end
+        })
+        
+        VisualsSection:Toggle({
+            Name = "Hitbox Highlights", 
+            Flag = "ESP/Tank/Hitbox", 
+            Value = true,
+            Callback = function(Bool)
+                if not Bool then
+                    for tank, _ in pairs(tankHighlights) do
+                        clearTankHighlights(tank)
+                    end
+                else
+                    applyAllESP()
+                end
+            end
+        })
+        
+        VisualsSection:Toggle({
+            Name = "Team Check", 
+            Flag = "ESP/Tank/TeamCheck", 
+            Value = true,
+            Callback = function(Bool)
+                applyAllESP()
+            end
+        })
+        
+        VisualsSection:Toggle({
+            Name = "Distance Check", 
+            Flag = "ESP/Tank/DistanceCheck", 
+            Value = false,
+            Callback = function(Bool)
+                applyAllESP()
+            end
+        })
+        
+        VisualsSection:Slider({
+            Name = "Distance", 
+            Flag = "ESP/Tank/Distance", 
+            Min = 25, 
+            Max = 1000, 
+            Value = 250, 
+            Unit = "studs",
+            Callback = function(Value)
+                applyAllESP()
+            end
+        })
+        
+        VisualsSection:Slider({
+            Name = "Fill Transparency", 
+            Flag = "ESP/Tank/Transparency", 
+            Min = 0, 
+            Max = 1, 
+            Value = 0.5,
+            Callback = function(Value)
+                applyAllESP()
+            end
+        })
+        
+        VisualsSection:Colorpicker({
+            Name = "Box Color", 
+            Flag = "ESP/Tank/BoxColor", 
+            Value = {1, 1, 1, 0, false}
+        })
+    end
+    
+    Parvus.Utilities:SettingsSection(Window, "RightShift", false)
+end
+
+Parvus.Utilities.InitAutoLoad(Window)
+Parvus.Utilities:SetupWatermark(Window)
+Parvus.Utilities.Drawing.SetupCursor(Window)
+Parvus.Utilities.Drawing.SetupCrosshair(Window.Flags)
+
 -- Storage
 local tankHighlights = {}
 local boxContainers = {}
@@ -413,115 +526,18 @@ debugPrint("  Yellow = Turret Drive")
 debugPrint("  Light Blue = Tracks")
 debugPrint("========================================")
 
--- ============================================================
--- PARVUS UI FRAMEWORK INTEGRATION
--- ============================================================
-
-local Window = Parvus.Utilities.UI:Window({
-    Name = ("Parvus Hub %s %s"):format(utf8.char(8212), Parvus.Game.Name),
-    Position = UDim2.new(0.5, -173 * 3, 0.5, -173), 
-    Size = UDim2.new(0, 346, 0, 346)
-}) do
-
-    local VisualsSection = Parvus.Utilities:ESPSection(Window, "Tank ESP", "ESP/Tank", true, true, false, false, true, false) do
-        VisualsSection:Toggle({
-            Name = "Tank ESP Enabled", 
-            Flag = "ESP/Tank/Enabled", 
-            Value = true,
-            Callback = function(Bool)
-                if not Bool then
-                    for tank, _ in pairs(tankHighlights) do
-                        clearTankHighlights(tank)
-                        clearBox(tank)
-                    end
-                else
-                    applyAllESP()
-                end
-            end
-        })
-        
-        VisualsSection:Toggle({
-            Name = "3D Box ESP", 
-            Flag = "ESP/Tank/Box", 
-            Value = true,
-            Callback = function(Bool)
-                if not Bool then
-                    for tank, folder in pairs(boxContainers) do
-                        clearBox(tank)
-                    end
-                else
-                    applyAllESP()
-                end
-            end
-        })
-        
-        VisualsSection:Toggle({
-            Name = "Hitbox Highlights", 
-            Flag = "ESP/Tank/Hitbox", 
-            Value = true,
-            Callback = function(Bool)
-                if not Bool then
-                    for tank, _ in pairs(tankHighlights) do
-                        clearTankHighlights(tank)
-                    end
-                else
-                    applyAllESP()
-                end
-            end
-        })
-        
-        VisualsSection:Toggle({
-            Name = "Team Check", 
-            Flag = "ESP/Tank/TeamCheck", 
-            Value = true,
-            Callback = function(Bool)
-                applyAllESP()
-            end
-        })
-        
-        VisualsSection:Toggle({
-            Name = "Distance Check", 
-            Flag = "ESP/Tank/DistanceCheck", 
-            Value = false,
-            Callback = function(Bool)
-                applyAllESP()
-            end
-        })
-        
-        VisualsSection:Slider({
-            Name = "Distance", 
-            Flag = "ESP/Tank/Distance", 
-            Min = 25, 
-            Max = 1000, 
-            Value = 250, 
-            Unit = "studs",
-            Callback = function(Value)
-                applyAllESP()
-            end
-        })
-        
-        VisualsSection:Slider({
-            Name = "Fill Transparency", 
-            Flag = "ESP/Tank/Transparency", 
-            Min = 0, 
-            Max = 1, 
-            Value = 0.5,
-            Callback = function(Value)
-                applyAllESP()
-            end
-        })
-        
-        VisualsSection:Colorpicker({
-            Name = "Box Color", 
-            Flag = "ESP/Tank/BoxColor", 
-            Value = {1, 1, 1, 0, false}
-        })
+-- Periodic refresh
+task.spawn(function()
+    while true do
+        task.wait(3)
+        applyAllESP()
     end
-    
-    Parvus.Utilities:SettingsSection(Window, "RightShift", false)
-end
+end)
 
-Parvus.Utilities.InitAutoLoad(Window)
-Parvus.Utilities:SetupWatermark(Window)
-Parvus.Utilities.Drawing.SetupCursor(Window)
-Parvus.Utilities.Drawing.SetupCrosshair(Window.Flags)
+-- Fast validation
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        validateESP()
+    end
+end)
