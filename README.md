@@ -18,7 +18,7 @@ loadstring(game:HttpGet(Source .. "Loader.lua"), "Loader")(Branch, NotificationT
 - [The Wild West](https://www.roblox.com/games/2317712696/)
 - [Steel Titans](https://www.roblox.com/games/4746041618/)
 
-### Features *(Mostly Outdated [But Will Be Updated Ny Ayham)*
+### Features *(Mostly Outdated [But Will Be Updated By Ayham)*
 ```markdown
 # Universal
   * Aimbot
@@ -146,6 +146,7 @@ loadstring(game:HttpGet(Source .. "Loader.lua"), "Loader")(Branch, NotificationT
   * Item ESP
   * Map ESP
 ```
+
 
 
 
