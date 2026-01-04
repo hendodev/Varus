@@ -3,7 +3,7 @@ repeat task.wait() until game.GameId ~= 0
 
 if Parvus and Parvus.Loaded then
     Parvus.Utilities.UI:Push({
-        Title = "Parvus Hub",
+        Title = "Varus Hub",
         Description = "Script already running!",
         Duration = 5
     }) return
@@ -84,9 +84,8 @@ LoadScript(Parvus.Game.Script)
 Parvus.Loaded = true
 
 Parvus.Utilities.UI:Push({
-    Title = "Varus
- Hub",
-    Description = Parvus.Game.Name .. " loaded!\n\nTThis Script Was Made By Ayham.",
+    Title = "Varus Hub",
+    Description = Parvus.Game.Name .. " loaded!\n\nThis Script Was Made By Ayham.",
     Duration = NotificationTime
 })
 
