@@ -23,7 +23,19 @@ local partFlagMap = {
 local function getFlagColor(flagName, defaultColor3)
     local data = Window and Window.Flags[flagName] or nil
     if type(data) == "table" and #data >= 3 then
-        return Color3.fromRGB(math.floor(data[1] * 255), math.floor(data[2] * 255), math.floor(data[3] * 255))
+        local r, g, b = data[1], data[2], data[3]
+        -- Support both normalized (0..1) and 0..255 values
+        if r > 1 or g > 1 or b > 1 then
+            r = math.clamp(math.floor(r), 0, 255)
+            g = math.clamp(math.floor(g), 0, 255)
+            b = math.clamp(math.floor(b), 0, 255)
+            return Color3.fromRGB(r, g, b)
+        else
+            r = math.clamp(math.floor(r * 255), 0, 255)
+            g = math.clamp(math.floor(g * 255), 0, 255)
+            b = math.clamp(math.floor(b * 255), 0, 255)
+            return Color3.fromRGB(r, g, b)
+        end
     elseif typeof(data) == "Color3" then
         return data
     else
@@ -220,24 +232,7 @@ local function debugPrint(message)
 end
 
 
-local partFlagMap = {
-    ["Ammo rack"] = "AmmoRack",
-    ["Fuel tank"] = "FuelTank",
-    ["Barrel"] = "Barrel",
-    ["Hull crew"] = "HullCrew",
-    ["Turret crew"] = "TurretCrew",
-}
-
-local function getFlagColor(flagName, defaultColor3)
-    local data = Window.Flags[flagName]
-    if type(data) == "table" and #data >= 3 then
-        return Color3.fromRGB(math.floor(data[1] * 255), math.floor(data[2] * 255), math.floor(data[3] * 255))
-    elseif typeof(data) == "Color3" then
-        return data
-    else
-        return defaultColor3
-    end
-end
+-- (partFlagMap and getFlagColor defined earlier)
 
 local function createHighlight(object, color, fillTransparency)
     if not object:IsA("BasePart") and not object:IsA("MeshPart") then return nil end
@@ -456,9 +451,9 @@ local function update3DBox(tank, folder)
     if not success then return end
     
     boxSize = Vector3.new(
-        math.clamp(boxSize.X, 5, 50),
-        math.clamp(boxSize.Y, 3, 20),
-        math.clamp(boxSize.Z, 5, 50)
+        math.clamp(boxSize.X, 1, 200),
+        math.clamp(boxSize.Y, 1, 200),
+        math.clamp(boxSize.Z, 1, 200)
     )
     
     local half = boxSize / 2
@@ -605,7 +600,7 @@ local function create3DBoxForModel(model, containersTable, flagsPrefix)
 end
 
 local function update3DBoxForModel(model, folder, flagsPrefix)
-    if not model.Parent then
+    if not model or not model.Parent then
         if folder and folder.Parent then folder:Destroy() end
         return
     end
@@ -618,9 +613,9 @@ local function update3DBoxForModel(model, folder, flagsPrefix)
     if not success then return end
 
     boxSize = Vector3.new(
-        math.clamp(boxSize.X, 5, 50),
-        math.clamp(boxSize.Y, 3, 20),
-        math.clamp(boxSize.Z, 5, 50)
+        math.clamp(boxSize.X, 1, 200),
+        math.clamp(boxSize.Y, 1, 200),
+        math.clamp(boxSize.Z, 1, 200)
     )
 
     local half = boxSize / 2
@@ -706,17 +701,16 @@ local function highlightModelParts(model, highlightsTable, partsPrefix, transpar
 end
 
 -- Hanger model lookup helper
-local function getHangerModel()
-    if not Workspace:FindFirstChild("Ignore") then return nil end
+local function getHangerModels()
+    local out = {}
+    if not Workspace:FindFirstChild("Ignore") then return out end
     local ig = Workspace.Ignore
-    local key = "Panzer 4 Ausf.F1"
-    if ig:FindFirstChild(key) then
-        local model = ig[key]
-        if model and model:FindFirstChild("Main") and model.Main:FindFirstChild("Hitboxes") then
-            return model
+    for _, child in pairs(ig:GetChildren()) do
+        if child and child:IsA("Model") and child:FindFirstChild("Main") and child.Main:FindFirstChild("Hitboxes") then
+            table.insert(out, child)
         end
     end
-    return nil
+    return out
 end
 
 
@@ -780,14 +774,25 @@ task.spawn(function()
         task.wait(0.5)
         local enabled = Window.Flags["ESP/Tank/Lobby/Game/Enabled"]
         local tank = getLocalTank()
-        if not enabled or not tank then
-            if tank and localHighlights[tank] then
-                for _, hl in pairs(localHighlights[tank]) do if hl and hl.Parent then hl:Destroy() end end
-                localHighlights[tank] = nil
+        if not enabled then
+            -- destroy all local highlights and boxes
+            for m, list in pairs(localHighlights) do
+                for _, hl in pairs(list) do if hl and hl.Parent then hl:Destroy() end end
+                localHighlights[m] = nil
             end
-            if tank and localBoxContainers[tank] then
-                localBoxContainers[tank]:Destroy()
-                localBoxContainers[tank] = nil
+            for m, f in pairs(localBoxContainers) do
+                if f and f.Parent then f:Destroy() end
+                localBoxContainers[m] = nil
+            end
+        elseif not tank then
+            -- no local tank found; ensure cleared
+            for m, list in pairs(localHighlights) do
+                for _, hl in pairs(list) do if hl and hl.Parent then hl:Destroy() end end
+                localHighlights[m] = nil
+            end
+            for m, f in pairs(localBoxContainers) do
+                if f and f.Parent then f:Destroy() end
+                localBoxContainers[m] = nil
             end
         else
             if Window.Flags["ESP/Tank/Lobby/Game/Hitbox"] then
@@ -806,24 +811,36 @@ task.spawn(function()
     while true do
         task.wait(1)
         local enabled = Window.Flags["ESP/Tank/Lobby/Hanger/Enabled"]
-        local model = getHangerModel()
-        if not enabled or not model then
-            if model and hangerHighlights[model] then
-                for _, hl in pairs(hangerHighlights[model]) do if hl and hl.Parent then hl:Destroy() end end
-                hangerHighlights[model] = nil
+        local models = getHangerModels()
+        if not enabled or #models == 0 then
+            -- clear all hanger highlights/boxes
+            for m, list in pairs(hangerHighlights) do
+                for _, hl in pairs(list) do if hl and hl.Parent then hl:Destroy() end end
+                hangerHighlights[m] = nil
             end
-            if model and hangerBoxContainers[model] then
-                hangerBoxContainers[model]:Destroy()
-                hangerBoxContainers[model] = nil
+            for m, f in pairs(hangerBoxContainers) do
+                if f and f.Parent then f:Destroy() end
+                hangerBoxContainers[m] = nil
             end
         else
-            if Window.Flags["ESP/Tank/Lobby/Hanger/Hitbox"] then
-                highlightModelParts(model, hangerHighlights, "ESP/Tank/Lobby/Parts", "ESP/Tank/Lobby/Hanger/Transparency")
+            for _, model in ipairs(models) do
+                if Window.Flags["ESP/Tank/Lobby/Hanger/Hitbox"] then
+                    highlightModelParts(model, hangerHighlights, "ESP/Tank/Lobby/Parts", "ESP/Tank/Lobby/Hanger/Transparency")
+                end
+                if Window.Flags["ESP/Tank/Lobby/Hanger/Box"] then
+                    create3DBoxForModel(model, hangerBoxContainers, "ESP/Tank/Lobby/Hanger")
+                else
+                    if hangerBoxContainers[model] then hangerBoxContainers[model]:Destroy() hangerBoxContainers[model] = nil end
+                end
             end
-            if Window.Flags["ESP/Tank/Lobby/Hanger/Box"] then
-                create3DBoxForModel(model, hangerBoxContainers, "ESP/Tank/Lobby/Hanger")
-            else
-                if hangerBoxContainers[model] then hangerBoxContainers[model]:Destroy() hangerBoxContainers[model] = nil end
+            for m, _ in pairs(hangerBoxContainers) do
+                if not table.find(models, m) then if hangerBoxContainers[m] then hangerBoxContainers[m]:Destroy() end hangerBoxContainers[m] = nil end
+            end
+            for m, _ in pairs(hangerHighlights) do
+                if not table.find(models, m) then
+                    for _, hl in pairs(hangerHighlights[m]) do if hl and hl.Parent then hl:Destroy() end end
+                    hangerHighlights[m] = nil
+                end
             end
         end
     end
