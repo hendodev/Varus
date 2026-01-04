@@ -24,7 +24,6 @@ local function getFlagColor(flagName, defaultColor3)
     local data = Window and Window.Flags[flagName] or nil
     if type(data) == "table" and #data >= 3 then
         local r, g, b = data[1], data[2], data[3]
-        -- Support both normalized (0..1) and 0..255 values
         if r > 1 or g > 1 or b > 1 then
             r = math.clamp(math.floor(r), 0, 255)
             g = math.clamp(math.floor(g), 0, 255)
@@ -122,7 +121,6 @@ local Window = Parvus.Utilities.UI:Window({
                 Max = 10, 
                 Value = 1,
                 Callback = function(Value)
-                    -- update boxes next frame
                     task.defer(applyAllESP)
                 end
             })
@@ -161,7 +159,6 @@ local Window = Parvus.Utilities.UI:Window({
         end
         
         local PartsSection = VisualsTab:Section({Name = "Parts", Side = "Right"}) do
-            -- Create toggles + colorpickers based on highlightedObjects
             for displayName, cfg in pairs(highlightedObjects) do
                 local flagId = partFlagMap[displayName]
                 if not flagId then continue end
@@ -232,7 +229,6 @@ local function debugPrint(message)
 end
 
 
--- (partFlagMap and getFlagColor defined earlier)
 
 local function createHighlight(object, color, fillTransparency)
     if not object:IsA("BasePart") and not object:IsA("MeshPart") then return nil end
@@ -330,7 +326,6 @@ local function highlightEnemyTank(tank)
     local fillTransparency = Window.Flags["ESP/Tank/Transparency"] or 0.5
 
     if tankHighlights[tank] then
-        -- update colors/transparency of existing highlights
         for _, hl in pairs(tankHighlights[tank]) do
             if hl and hl.Adornee then
                 local partName = hl.Adornee.Name
@@ -663,7 +658,6 @@ local function highlightModelParts(model, highlightsTable, partsPrefix, transpar
     local fillTransparency = Window.Flags[transparencyFlagPrefix] or 0.5
 
     if highlightsTable[model] then
-        -- update existing highlights' colors/transparency
         for _, hl in pairs(highlightsTable[model]) do
             if hl and hl.Adornee then
                 local partName = hl.Adornee.Name
@@ -700,7 +694,6 @@ local function highlightModelParts(model, highlightsTable, partsPrefix, transpar
     end
 end
 
--- Hanger model lookup helper
 local function getHangerModels()
     local out = {}
     if not Workspace:FindFirstChild("Ignore") then return out end
@@ -775,7 +768,6 @@ task.spawn(function()
         local enabled = Window.Flags["ESP/Tank/Lobby/Game/Enabled"]
         local tank = getLocalTank()
         if not enabled then
-            -- destroy all local highlights and boxes
             for m, list in pairs(localHighlights) do
                 for _, hl in pairs(list) do if hl and hl.Parent then hl:Destroy() end end
                 localHighlights[m] = nil
@@ -785,7 +777,6 @@ task.spawn(function()
                 localBoxContainers[m] = nil
             end
         elseif not tank then
-            -- no local tank found; ensure cleared
             for m, list in pairs(localHighlights) do
                 for _, hl in pairs(list) do if hl and hl.Parent then hl:Destroy() end end
                 localHighlights[m] = nil
@@ -813,7 +804,6 @@ task.spawn(function()
         local enabled = Window.Flags["ESP/Tank/Lobby/Hanger/Enabled"]
         local models = getHangerModels()
         if not enabled or #models == 0 then
-            -- clear all hanger highlights/boxes
             for m, list in pairs(hangerHighlights) do
                 for _, hl in pairs(list) do if hl and hl.Parent then hl:Destroy() end end
                 hangerHighlights[m] = nil
