@@ -4,6 +4,33 @@ local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local highlightedObjects = {
+    ["Ammo rack"] = { color = Color3.fromRGB(255, 0, 0), fillTransparency = 0.5 },
+    ["Fuel tank"] = { color = Color3.fromRGB(255, 165, 0), fillTransparency = 0.5 },
+    ["Barrel"] = { color = Color3.fromRGB(0, 0, 255), fillTransparency = 0.5 },
+    ["Hull crew"] = { color = Color3.fromRGB(160, 32, 240), fillTransparency = 0.5 },
+    ["Turret crew"] = { color = Color3.fromRGB(255, 0, 255), fillTransparency = 0.5 },
+}
+
+local partFlagMap = {
+    ["Ammo rack"] = "AmmoRack",
+    ["Fuel tank"] = "FuelTank",
+    ["Barrel"] = "Barrel",
+    ["Hull crew"] = "HullCrew",
+    ["Turret crew"] = "TurretCrew",
+}
+
+local function getFlagColor(flagName, defaultColor3)
+    local data = Window and Window.Flags[flagName] or nil
+    if type(data) == "table" and #data >= 3 then
+        return Color3.fromRGB(math.floor(data[1] * 255), math.floor(data[2] * 255), math.floor(data[3] * 255))
+    elseif typeof(data) == "Color3" then
+        return data
+    else
+        return defaultColor3
+    end
+end
+
 
 local Window = Parvus.Utilities.UI:Window({
     Name = ("Varus Hub %s %s"):format(utf8.char(8212), Parvus.Game.Name),
@@ -122,28 +149,21 @@ local Window = Parvus.Utilities.UI:Window({
         end
         
         local PartsSection = VisualsTab:Section({Name = "Parts", Side = "Right"}) do
-            -- Define available parts and create toggles + colorpickers
-            local parts = {
-                {name = "Ammo rack", id = "AmmoRack", color = Color3.fromRGB(255,0,0)},
-                {name = "Fuel tank", id = "FuelTank", color = Color3.fromRGB(255,165,0)},
-                {name = "Barrel", id = "Barrel", color = Color3.fromRGB(0,0,255)},
-                {name = "Hull crew", id = "HullCrew", color = Color3.fromRGB(160,32,240)},
-                {name = "Turret crew", id = "TurretCrew", color = Color3.fromRGB(255,0,255)},
-            }
-
-            for _, p in ipairs(parts) do
-                local flagBase = ("ESP/Tank/Parts/%s"):format(p.id)
+            -- Create toggles + colorpickers based on highlightedObjects
+            for displayName, cfg in pairs(highlightedObjects) do
+                local flagId = partFlagMap[displayName]
+                if not flagId then continue end
+                local flagBase = ("ESP/Tank/Parts/%s"):format(flagId)
                 PartsSection:Toggle({
-                    Name = p.name .. " Enabled",
+                    Name = displayName .. " Enabled",
                     Flag = flagBase .. "/Enabled",
                     Value = true,
                     Callback = function() applyAllESP() end
                 })
 
-                -- convert default Color3 to normalized table
-                local defaultColor = {p.color.R, p.color.G, p.color.B, 0, false}
+                local defaultColor = {cfg.color.R, cfg.color.G, cfg.color.B, 0, false}
                 PartsSection:Colorpicker({
-                    Name = p.name .. " Color",
+                    Name = displayName .. " Color",
                     Flag = flagBase .. "/Color",
                     Value = defaultColor,
                     Callback = function() applyAllESP() end
@@ -160,6 +180,38 @@ Parvus.Utilities:SetupWatermark(Window)
 Parvus.Utilities.Drawing.SetupCursor(Window)
 Parvus.Utilities.Drawing.SetupCrosshair(Window.Flags)
 
+do
+    local LobbyTab = Window:Tab({Name = "Lobby"}) do
+        local GameSection = LobbyTab:Section({Name = "Game", Side = "Left"}) do
+            GameSection:Toggle({Name = "Enable Local Tank ESP", Flag = "ESP/Tank/Lobby/Game/Enabled", Value = false})
+            GameSection:Toggle({Name = "3D Box", Flag = "ESP/Tank/Lobby/Game/Box", Value = true})
+            GameSection:Toggle({Name = "Hitbox Highlights", Flag = "ESP/Tank/Lobby/Game/Hitbox", Value = true})
+            GameSection:Slider({Name = "Fill Transparency", Flag = "ESP/Tank/Lobby/Game/Transparency", Min = 0, Max = 1, Value = 0.5, Callback = function() end})
+            GameSection:Colorpicker({Name = "Box Color", Flag = "ESP/Tank/Lobby/Game/BoxColor", Value = {1,1,1,0,false}})
+            GameSection:Slider({Name = "Edge Thickness", Flag = "ESP/Tank/Lobby/Game/Box/Thickness", Min = 1, Max = 10, Value = 1})
+        end
+
+        local HangerSection = LobbyTab:Section({Name = "Hanger", Side = "Right"}) do
+            HangerSection:Toggle({Name = "Enable Hanger ESP", Flag = "ESP/Tank/Lobby/Hanger/Enabled", Value = false})
+            HangerSection:Toggle({Name = "3D Box", Flag = "ESP/Tank/Lobby/Hanger/Box", Value = true})
+            HangerSection:Toggle({Name = "Hitbox Highlights", Flag = "ESP/Tank/Lobby/Hanger/Hitbox", Value = true})
+            HangerSection:Slider({Name = "Fill Transparency", Flag = "ESP/Tank/Lobby/Hanger/Transparency", Min = 0, Max = 1, Value = 0.5})
+            HangerSection:Colorpicker({Name = "Box Color", Flag = "ESP/Tank/Lobby/Hanger/BoxColor", Value = {1,1,1,0,false}})
+            HangerSection:Slider({Name = "Edge Thickness", Flag = "ESP/Tank/Lobby/Hanger/Box/Thickness", Min = 1, Max = 10, Value = 1})
+        end
+
+        local LobbyParts = LobbyTab:Section({Name = "Parts", Side = "Left"}) do
+            for displayName, cfg in pairs(highlightedObjects) do
+                local flagId = partFlagMap[displayName]
+                if not flagId then continue end
+                local flagBase = ("ESP/Tank/Lobby/Parts/%s"):format(flagId)
+                LobbyParts:Toggle({Name = displayName .. " Enabled", Flag = flagBase .. "/Enabled", Value = true})
+                LobbyParts:Colorpicker({Name = displayName .. " Color", Flag = flagBase .. "/Color", Value = {cfg.color.R, cfg.color.G, cfg.color.B, 0, false}})
+            end
+        end
+    end
+end
+
 local tankHighlights = {}
 local boxContainers = {}
 
@@ -167,30 +219,7 @@ local function debugPrint(message)
     print("[Tank ESP] " .. message)
 end
 
-local highlightedObjects = {
-    ["Ammo rack"] = {
-        color = Color3.fromRGB(255, 0, 0), -- Red
-        fillTransparency = 0.5,
-    },
-    ["Fuel tank"] = {
-        color = Color3.fromRGB(255, 165, 0), -- Orange
-        fillTransparency = 0.5,
-    },
-    ["Barrel"] = {
-        color = Color3.fromRGB(0, 0, 255), -- Blue
-        fillTransparency = 0.5,
-    },
-    ["Hull crew"] = {
-        color = Color3.fromRGB(160, 32, 240), -- Purple
-        fillTransparency = 0.5,
-    },
-    ["Turret crew"] = {
-        color = Color3.fromRGB(255, 0, 255), -- Magenta
-        fillTransparency = 0.5,
-    },
-}
 
--- Mapping from part display name to flag id (used for UI flags)
 local partFlagMap = {
     ["Ammo rack"] = "AmmoRack",
     ["Fuel tank"] = "FuelTank",
@@ -303,8 +332,27 @@ local function highlightEnemyTank(tank)
         clearTankHighlights(tank)
         return 
     end
-    
-    clearTankHighlights(tank)
+    local fillTransparency = Window.Flags["ESP/Tank/Transparency"] or 0.5
+
+    if tankHighlights[tank] then
+        -- update colors/transparency of existing highlights
+        for _, hl in pairs(tankHighlights[tank]) do
+            if hl and hl.Adornee then
+                local partName = hl.Adornee.Name
+                local cfg = highlightedObjects[partName]
+                if cfg then
+                    local flagId = partFlagMap[partName]
+                    local color = cfg.color
+                    if flagId then
+                        color = getFlagColor(("ESP/Tank/Parts/%s/Color"):format(flagId), cfg.color)
+                    end
+                    hl.Color3 = color
+                    hl.Transparency = fillTransparency
+                end
+            end
+        end
+        return
+    end
     tankHighlights[tank] = {}
     
     local main = tank:FindFirstChild("Main")
@@ -314,7 +362,6 @@ local function highlightEnemyTank(tank)
     if not hitboxes then return end
     
     local foundCount = 0
-    local fillTransparency = Window.Flags["ESP/Tank/Transparency"] or 0.5
     
     for _, descendant in ipairs(hitboxes:GetDescendants()) do
         if (descendant:IsA("MeshPart") or descendant:IsA("BasePart")) then
@@ -505,6 +552,174 @@ local function applyAllESP()
     end
 end
 
+local localHighlights = {}
+local localBoxContainers = {}
+local hangerHighlights = {}
+local hangerBoxContainers = {}
+
+local function getLocalTank()
+    for _, child in ipairs(Workspace:GetChildren()) do
+        if child:IsA("Model") then
+            local owner = child:FindFirstChild("Owner")
+            if owner and owner:IsA("StringValue") and owner.Value == LocalPlayer.Name then
+                return child
+            end
+        end
+    end
+    return nil
+end
+
+local function create3DBoxForModel(model, containersTable, flagsPrefix)
+    if containersTable[model] then return end
+
+    local folder = Instance.new("Folder")
+    folder.Name = "TankBoxESP"
+    folder.Parent = Workspace.CurrentCamera
+
+    local edges = {
+        {1,2}, {2,3}, {3,4}, {4,1},
+        {5,6}, {6,7}, {7,8}, {8,5},
+        {1,5}, {2,6}, {3,7}, {4,8},
+    }
+
+    local boxColorData = Window.Flags[flagsPrefix .. "/BoxColor"] or {1,1,1,0,false}
+    local boxColor = Color3.fromRGB(math.floor(boxColorData[1]*255), math.floor(boxColorData[2]*255), math.floor(boxColorData[3]*255))
+    local thicknessVal = (Window.Flags[flagsPrefix .. "/Box/Thickness"] or 1) * 0.3
+
+    for i, edge in ipairs(edges) do
+        local part = Instance.new("Part")
+        part.Name = "Edge_" .. edge[1] .. "_" .. edge[2]
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanTouch = false
+        part.Material = Enum.Material.Neon
+        part.Color = boxColor
+        part.Transparency = 0
+        part.Size = Vector3.new(thicknessVal, thicknessVal, 1)
+        part.CastShadow = false
+        part.Massless = true
+        part.Parent = folder
+    end
+
+    containersTable[model] = folder
+end
+
+local function update3DBoxForModel(model, folder, flagsPrefix)
+    if not model.Parent then
+        if folder and folder.Parent then folder:Destroy() end
+        return
+    end
+
+    local main = model:FindFirstChild("Main")
+    local hull = main and main:FindFirstChild("Hull")
+    local boxModel = hull or main or model
+
+    local success, boxCF, boxSize = pcall(boxModel.GetBoundingBox, boxModel)
+    if not success then return end
+
+    boxSize = Vector3.new(
+        math.clamp(boxSize.X, 5, 50),
+        math.clamp(boxSize.Y, 3, 20),
+        math.clamp(boxSize.Z, 5, 50)
+    )
+
+    local half = boxSize / 2
+    local corners = {
+        Vector3.new(-half.X, -half.Y, -half.Z),
+        Vector3.new( half.X, -half.Y, -half.Z),
+        Vector3.new( half.X,  half.Y, -half.Z),
+        Vector3.new(-half.X,  half.Y, -half.Z),
+        Vector3.new(-half.X, -half.Y,  half.Z),
+        Vector3.new( half.X, -half.Y,  half.Z),
+        Vector3.new( half.X,  half.Y,  half.Z),
+        Vector3.new(-half.X,  half.Y,  half.Z),
+    }
+
+    local edges = {
+        {1,2}, {2,3}, {3,4}, {4,1},
+        {5,6}, {6,7}, {7,8}, {8,5},
+        {1,5}, {2,6}, {3,7}, {4,8},
+    }
+
+    for i, edge in ipairs(edges) do
+        local part = folder:FindFirstChild("Edge_" .. edge[1] .. "_" .. edge[2])
+        if part then
+            local a = corners[edge[1]]
+            local b = corners[edge[2]]
+            local p1 = boxCF * a
+            local p2 = boxCF * b
+            local mid = (p1 + p2) / 2
+            local dir = p2 - p1
+            local len = dir.Magnitude
+            if len > 0 then
+                local thicknessVal = (Window.Flags[flagsPrefix .. "/Box/Thickness"] or 1) * 0.3
+                part.Size = Vector3.new(thicknessVal, thicknessVal, len)
+                part.CFrame = CFrame.lookAt(mid, mid + dir.Unit)
+            end
+        end
+    end
+end
+
+local function highlightModelParts(model, highlightsTable, partsPrefix, transparencyFlagPrefix)
+    if not model or not model.Parent then return end
+    local main = model:FindFirstChild("Main") if not main then return end
+    local hitboxes = main:FindFirstChild("Hitboxes") if not hitboxes then return end
+
+    local fillTransparency = Window.Flags[transparencyFlagPrefix] or 0.5
+
+    if highlightsTable[model] then
+        -- update existing highlights' colors/transparency
+        for _, hl in pairs(highlightsTable[model]) do
+            if hl and hl.Adornee then
+                local partName = hl.Adornee.Name
+                local cfg = highlightedObjects[partName]
+                if cfg then
+                    local flagId = partFlagMap[partName]
+                    local color = cfg.color
+                    if flagId then
+                        color = getFlagColor(partsPrefix .. "/" .. flagId .. "/Color", cfg.color)
+                    end
+                    hl.Color3 = color
+                    hl.Transparency = fillTransparency
+                end
+            end
+        end
+        return
+    end
+
+    highlightsTable[model] = {}
+    for _, descendant in ipairs(hitboxes:GetDescendants()) do
+        if (descendant:IsA("MeshPart") or descendant:IsA("BasePart")) then
+            local partName = descendant.Name
+            local cfg = highlightedObjects[partName]
+            if not cfg then continue end
+            local flagId = partFlagMap[partName]
+            local enabled = true
+            if flagId then enabled = Window.Flags[partsPrefix .. "/" .. flagId .. "/Enabled"] end
+            if enabled == false then continue end
+            local color = cfg.color
+            if flagId then color = getFlagColor(partsPrefix .. "/" .. flagId .. "/Color", cfg.color) end
+            local hl = createHighlight(descendant, color, fillTransparency)
+            if hl then table.insert(highlightsTable[model], hl) end
+        end
+    end
+end
+
+-- Hanger model lookup helper
+local function getHangerModel()
+    if not Workspace:FindFirstChild("Ignore") then return nil end
+    local ig = Workspace.Ignore
+    local key = "Panzer 4 Ausf.F1"
+    if ig:FindFirstChild(key) then
+        local model = ig[key]
+        if model and model:FindFirstChild("Main") and model.Main:FindFirstChild("Hitboxes") then
+            return model
+        end
+    end
+    return nil
+end
+
+
 local function validateESP()
     for tank, _ in pairs(tankHighlights) do
         if not tank or not tank.Parent or not isEnemyTank(tank) then
@@ -532,6 +747,16 @@ RunService.RenderStepped:Connect(function()
             update3DBox(tank, folder)
         end
     end
+    for tank, folder in pairs(localBoxContainers) do
+        if folder and folder.Parent then
+            update3DBoxForModel(tank, folder, "ESP/Tank/Lobby/Game")
+        end
+    end
+    for model, folder in pairs(hangerBoxContainers) do
+        if folder and folder.Parent then
+            update3DBoxForModel(model, folder, "ESP/Tank/Lobby/Hanger")
+        end
+    end
     
     validateESP()
 end)
@@ -547,6 +772,60 @@ task.spawn(function()
     while true do
         task.wait(0.5)
         validateESP()
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        local enabled = Window.Flags["ESP/Tank/Lobby/Game/Enabled"]
+        local tank = getLocalTank()
+        if not enabled or not tank then
+            if tank and localHighlights[tank] then
+                for _, hl in pairs(localHighlights[tank]) do if hl and hl.Parent then hl:Destroy() end end
+                localHighlights[tank] = nil
+            end
+            if tank and localBoxContainers[tank] then
+                localBoxContainers[tank]:Destroy()
+                localBoxContainers[tank] = nil
+            end
+        else
+            if Window.Flags["ESP/Tank/Lobby/Game/Hitbox"] then
+                highlightModelParts(tank, localHighlights, "ESP/Tank/Lobby/Parts", "ESP/Tank/Lobby/Game/Transparency")
+            end
+            if Window.Flags["ESP/Tank/Lobby/Game/Box"] then
+                create3DBoxForModel(tank, localBoxContainers, "ESP/Tank/Lobby/Game")
+            else
+                if localBoxContainers[tank] then localBoxContainers[tank]:Destroy() localBoxContainers[tank] = nil end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        local enabled = Window.Flags["ESP/Tank/Lobby/Hanger/Enabled"]
+        local model = getHangerModel()
+        if not enabled or not model then
+            if model and hangerHighlights[model] then
+                for _, hl in pairs(hangerHighlights[model]) do if hl and hl.Parent then hl:Destroy() end end
+                hangerHighlights[model] = nil
+            end
+            if model and hangerBoxContainers[model] then
+                hangerBoxContainers[model]:Destroy()
+                hangerBoxContainers[model] = nil
+            end
+        else
+            if Window.Flags["ESP/Tank/Lobby/Hanger/Hitbox"] then
+                highlightModelParts(model, hangerHighlights, "ESP/Tank/Lobby/Parts", "ESP/Tank/Lobby/Hanger/Transparency")
+            end
+            if Window.Flags["ESP/Tank/Lobby/Hanger/Box"] then
+                create3DBoxForModel(model, hangerBoxContainers, "ESP/Tank/Lobby/Hanger")
+            else
+                if hangerBoxContainers[model] then hangerBoxContainers[model]:Destroy() hangerBoxContainers[model] = nil end
+            end
+        end
     end
 end)
 
