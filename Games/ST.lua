@@ -1,23 +1,12 @@
---[[
-    Tank ESP - BoxHandleAdornment Version with Parvus UI
-    - Uses BoxHandleAdornment for ESP (always visible through walls)
-    - Team-based detection
-    - Highlights specific hitbox parts only
-    - Full UI integration with Parvus Framework
-]]
-
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
--- ============================================================
--- PARVUS UI FRAMEWORK INITIALIZATION (FIRST)
--- ============================================================
 
 local Window = Parvus.Utilities.UI:Window({
-    Name = ("Parvus Hub %s %s"):format(utf8.char(8212), Parvus.Game.Name),
+    Name = ("Varus Hub %s %s"):format(utf8.char(8212), Parvus.Game.Name),
     Position = UDim2.new(0.5, -173 * 3, 0.5, -173), 
     Size = UDim2.new(0, 346, 0, 346)
 }) do
@@ -129,16 +118,13 @@ Parvus.Utilities:SetupWatermark(Window)
 Parvus.Utilities.Drawing.SetupCursor(Window)
 Parvus.Utilities.Drawing.SetupCrosshair(Window.Flags)
 
--- Storage
 local tankHighlights = {}
 local boxContainers = {}
 
--- Debug
 local function debugPrint(message)
     print("[Tank ESP] " .. message)
 end
 
--- Highlighted parts configuration
 local highlightedObjects = {
     ["Ammo rack"] = {
         color = Color3.fromRGB(255, 0, 0), -- Red
@@ -162,7 +148,6 @@ local highlightedObjects = {
     },
 }
 
--- Create highlight function
 local function createHighlight(object, color, fillTransparency)
     if not object:IsA("BasePart") and not object:IsA("MeshPart") then return nil end
     
@@ -178,7 +163,6 @@ local function createHighlight(object, color, fillTransparency)
     return highlight
 end
 
--- Get all tanks
 local function getAllTanks()
     local tanks = {}
     for _, child in ipairs(Workspace:GetChildren()) do
@@ -192,7 +176,6 @@ local function getAllTanks()
     return tanks
 end
 
--- Get player from tank
 local function getPlayerFromTank(tank)
     local owner = tank:FindFirstChild("Owner")
     if not owner or not owner:IsA("StringValue") then 
@@ -207,14 +190,12 @@ local function getPlayerFromTank(tank)
     return Players:FindFirstChild(ownerUsername)
 end
 
--- Check if enemy
 local function isEnemyTank(tank)
     local tankOwner = getPlayerFromTank(tank)
     
     if not tankOwner then return false end
     if tankOwner == LocalPlayer then return false end
     
-    -- Distance check
     if Window.Flags["ESP/Tank/DistanceCheck"] then
         local distance = Window.Flags["ESP/Tank/Distance"] or 250
         local main = tank:FindFirstChild("Main")
@@ -228,7 +209,6 @@ local function isEnemyTank(tank)
         end
     end
     
-    -- Team check
     if Window.Flags["ESP/Tank/TeamCheck"] then
         local myTeam = LocalPlayer.Team
         local theirTeam = tankOwner.Team
@@ -241,7 +221,6 @@ local function isEnemyTank(tank)
     return true
 end
 
--- Clear highlights for a tank
 local function clearTankHighlights(tank)
     if tankHighlights[tank] then
         for _, hl in pairs(tankHighlights[tank]) do
@@ -253,13 +232,11 @@ local function clearTankHighlights(tank)
     end
 end
 
--- Highlight enemy tank parts
 local function highlightEnemyTank(tank)
     if not Window.Flags["ESP/Tank/Enabled"] or not Window.Flags["ESP/Tank/Hitbox"] then 
         clearTankHighlights(tank)
         return 
     end
-    
     if not isEnemyTank(tank) then 
         clearTankHighlights(tank)
         return 
@@ -277,12 +254,9 @@ local function highlightEnemyTank(tank)
     local foundCount = 0
     local fillTransparency = Window.Flags["ESP/Tank/Transparency"] or 0.5
     
-    -- Search through ALL descendants of Hitboxes
     for _, descendant in ipairs(hitboxes:GetDescendants()) do
         if (descendant:IsA("MeshPart") or descendant:IsA("BasePart")) then
             local partName = descendant.Name
-            
-            -- Check if this part should be highlighted
             if highlightedObjects[partName] then
                 local config = highlightedObjects[partName]
                 local hl = createHighlight(descendant, config.color, fillTransparency)
@@ -300,7 +274,6 @@ local function highlightEnemyTank(tank)
     end
 end
 
--- Clear box
 local function clearBox(tank)
     if boxContainers[tank] then
         boxContainers[tank]:Destroy()
@@ -308,7 +281,6 @@ local function clearBox(tank)
     end
 end
 
--- Create 3D Box
 local function create3DBox(tank)
     if not Window.Flags["ESP/Tank/Enabled"] or not Window.Flags["ESP/Tank/Box"] then return end
     if boxContainers[tank] then return end
@@ -349,7 +321,6 @@ local function create3DBox(tank)
     boxContainers[tank] = folder
 end
 
--- Update 3D Box
 local function update3DBox(tank, folder)
     if not tank.Parent or not isEnemyTank(tank) then
         clearBox(tank)
@@ -406,7 +377,6 @@ local function update3DBox(tank, folder)
     end
 end
 
--- Apply all ESP
 local function applyAllESP()
     local tanks = getAllTanks()
     
@@ -447,7 +417,6 @@ local function applyAllESP()
     
     debugPrint("=== Highlighted " .. enemyCount .. " enemies ===")
     
-    -- Cleanup removed tanks
     for tank, _ in pairs(tankHighlights) do
         if not validTanks[tank] then
             clearTankHighlights(tank)
@@ -461,7 +430,6 @@ local function applyAllESP()
     end
 end
 
--- Validate ESP
 local function validateESP()
     for tank, _ in pairs(tankHighlights) do
         if not tank or not tank.Parent or not isEnemyTank(tank) then
@@ -471,9 +439,8 @@ local function validateESP()
     end
 end
 
--- Handle new tanks being added
 Workspace.ChildAdded:Connect(function(child)
-    task.wait(0.5) -- Wait for tank to fully load
+    task.wait(0.5) 
     if child:IsA("Model") and child:FindFirstChild("Owner") then
         local owner = getPlayerFromTank(child)
         if owner and isEnemyTank(child) then
@@ -484,7 +451,6 @@ Workspace.ChildAdded:Connect(function(child)
     end
 end)
 
--- Update loop
 RunService.RenderStepped:Connect(function()
     for tank, folder in pairs(boxContainers) do
         if folder and folder.Parent then
@@ -495,7 +461,6 @@ RunService.RenderStepped:Connect(function()
     validateESP()
 end)
 
--- Periodic refresh
 task.spawn(function()
     while true do
         task.wait(3)
@@ -503,7 +468,6 @@ task.spawn(function()
     end
 end)
 
--- Fast validation
 task.spawn(function()
     while true do
         task.wait(0.5)
@@ -511,26 +475,8 @@ task.spawn(function()
     end
 end)
 
--- Initial start
 task.wait(1.5)
-debugPrint("========================================")
-debugPrint("Tank ESP Starting with BoxHandleAdornment...")
-debugPrint("========================================")
 applyAllESP()
-debugPrint("========================================")
-debugPrint("Tank ESP Active!")
-debugPrint("Colors:")
-debugPrint("  Red = Ammo Rack")
-debugPrint("  Orange = Fuel Tank")
-debugPrint("  Blue = Barrel")
-debugPrint("  Purple = Hull Crew")
-debugPrint("  Green = Drivetrain")
-debugPrint("  Magenta = Turret Crew")
-debugPrint("  Yellow = Turret Drive")
-debugPrint("  Light Blue = Tracks")
-debugPrint("========================================")
-
--- Periodic refresh
 task.spawn(function()
     while true do
         task.wait(3)
@@ -538,7 +484,6 @@ task.spawn(function()
     end
 end)
 
--- Fast validation
 task.spawn(function()
     while true do
         task.wait(0.5)
