@@ -22,99 +22,103 @@ local Window = Parvus.Utilities.UI:Window({
     Size = UDim2.new(0, 346, 0, 346)
 }) do
 
-    local VisualsSection = Parvus.Utilities:ESPSection(Window, "Tank ESP", "ESP/Tank", true, true, false, false, true, false) do
-        VisualsSection:Toggle({
-            Name = "Tank ESP Enabled", 
-            Flag = "ESP/Tank/Enabled", 
-            Value = true,
-            Callback = function(Bool)
-                if not Bool then
-                    for tank, _ in pairs(tankHighlights) do
-                        clearTankHighlights(tank)
-                        clearBox(tank)
+    local VisualsTab = Window:Tab({Name = "Tank ESP"}) do
+        local VisualsSection = VisualsTab:Section({Name = "Highlights", Side = "Left"}) do
+            VisualsSection:Toggle({
+                Name = "Tank ESP Enabled", 
+                Flag = "ESP/Tank/Enabled", 
+                Value = true,
+                Callback = function(Bool)
+                    if not Bool then
+                        for tank, _ in pairs(tankHighlights) do
+                            clearTankHighlights(tank)
+                            clearBox(tank)
+                        end
+                    else
+                        applyAllESP()
                     end
-                else
+                end
+            })
+            
+            VisualsSection:Toggle({
+                Name = "3D Box ESP", 
+                Flag = "ESP/Tank/Box", 
+                Value = true,
+                Callback = function(Bool)
+                    if not Bool then
+                        for tank, folder in pairs(boxContainers) do
+                            clearBox(tank)
+                        end
+                    else
+                        applyAllESP()
+                    end
+                end
+            })
+            
+            VisualsSection:Toggle({
+                Name = "Hitbox Highlights", 
+                Flag = "ESP/Tank/Hitbox", 
+                Value = true,
+                Callback = function(Bool)
+                    if not Bool then
+                        for tank, _ in pairs(tankHighlights) do
+                            clearTankHighlights(tank)
+                        end
+                    else
+                        applyAllESP()
+                    end
+                end
+            })
+            
+            VisualsSection:Slider({
+                Name = "Fill Transparency", 
+                Flag = "ESP/Tank/Transparency", 
+                Min = 0, 
+                Max = 1, 
+                Value = 0.5,
+                Callback = function(Value)
                     applyAllESP()
                 end
-            end
-        })
+            })
+            
+            VisualsSection:Colorpicker({
+                Name = "Box Color", 
+                Flag = "ESP/Tank/BoxColor", 
+                Value = {1, 1, 1, 0, false}
+            })
+        end
         
-        VisualsSection:Toggle({
-            Name = "3D Box ESP", 
-            Flag = "ESP/Tank/Box", 
-            Value = true,
-            Callback = function(Bool)
-                if not Bool then
-                    for tank, folder in pairs(boxContainers) do
-                        clearBox(tank)
-                    end
-                else
+        local FilterSection = VisualsTab:Section({Name = "Filters", Side = "Right"}) do
+            FilterSection:Toggle({
+                Name = "Team Check", 
+                Flag = "ESP/Tank/TeamCheck", 
+                Value = true,
+                Callback = function(Bool)
                     applyAllESP()
                 end
-            end
-        })
-        
-        VisualsSection:Toggle({
-            Name = "Hitbox Highlights", 
-            Flag = "ESP/Tank/Hitbox", 
-            Value = true,
-            Callback = function(Bool)
-                if not Bool then
-                    for tank, _ in pairs(tankHighlights) do
-                        clearTankHighlights(tank)
-                    end
-                else
+            })
+            
+            FilterSection:Toggle({
+                Name = "Distance Check", 
+                Flag = "ESP/Tank/DistanceCheck", 
+                Value = false,
+                Callback = function(Bool)
                     applyAllESP()
                 end
-            end
-        })
-        
-        VisualsSection:Toggle({
-            Name = "Team Check", 
-            Flag = "ESP/Tank/TeamCheck", 
-            Value = true,
-            Callback = function(Bool)
-                applyAllESP()
-            end
-        })
-        
-        VisualsSection:Toggle({
-            Name = "Distance Check", 
-            Flag = "ESP/Tank/DistanceCheck", 
-            Value = false,
-            Callback = function(Bool)
-                applyAllESP()
-            end
-        })
-        
-        VisualsSection:Slider({
-            Name = "Distance", 
-            Flag = "ESP/Tank/Distance", 
-            Min = 25, 
-            Max = 1000, 
-            Value = 250, 
-            Unit = "studs",
-            Callback = function(Value)
-                applyAllESP()
-            end
-        })
-        
-        VisualsSection:Slider({
-            Name = "Fill Transparency", 
-            Flag = "ESP/Tank/Transparency", 
-            Min = 0, 
-            Max = 1, 
-            Value = 0.5,
-            Callback = function(Value)
-                applyAllESP()
-            end
-        })
-        
-        VisualsSection:Colorpicker({
-            Name = "Box Color", 
-            Flag = "ESP/Tank/BoxColor", 
-            Value = {1, 1, 1, 0, false}
-        })
+            })
+            
+            FilterSection:Slider({
+                Name = "Distance", 
+                Flag = "ESP/Tank/Distance", 
+                Min = 25, 
+                Max = 1000, 
+                Value = 250, 
+                Unit = "studs",
+                Callback = function(Value)
+                    applyAllESP()
+                end
+            })
+        end
     end
     
     Parvus.Utilities:SettingsSection(Window, "RightShift", false)
