@@ -75,6 +75,18 @@ local Window = Parvus.Utilities.UI:Window({
                 Flag = "ESP/Tank/BoxColor", 
                 Value = {1, 1, 1, 0, false}
             })
+            
+            VisualsSection:Slider({
+                Name = "Edge Thickness", 
+                Flag = "ESP/Tank/Box/Thickness", 
+                Min = 1, 
+                Max = 10, 
+                Value = 1,
+                Callback = function(Value)
+                    -- update boxes next frame
+                    task.defer(applyAllESP)
+                end
+            })
         end
         
         local FilterSection = VisualsTab:Section({Name = "Filters", Side = "Right"}) do
@@ -107,6 +119,36 @@ local Window = Parvus.Utilities.UI:Window({
                     applyAllESP()
                 end
             })
+        end
+        
+        local PartsSection = VisualsTab:Section({Name = "Parts", Side = "Right"}) do
+            -- Define available parts and create toggles + colorpickers
+            local parts = {
+                {name = "Ammo rack", id = "AmmoRack", color = Color3.fromRGB(255,0,0)},
+                {name = "Fuel tank", id = "FuelTank", color = Color3.fromRGB(255,165,0)},
+                {name = "Barrel", id = "Barrel", color = Color3.fromRGB(0,0,255)},
+                {name = "Hull crew", id = "HullCrew", color = Color3.fromRGB(160,32,240)},
+                {name = "Turret crew", id = "TurretCrew", color = Color3.fromRGB(255,0,255)},
+            }
+
+            for _, p in ipairs(parts) do
+                local flagBase = ("ESP/Tank/Parts/%s"):format(p.id)
+                PartsSection:Toggle({
+                    Name = p.name .. " Enabled",
+                    Flag = flagBase .. "/Enabled",
+                    Value = true,
+                    Callback = function() applyAllESP() end
+                })
+
+                -- convert default Color3 to normalized table
+                local defaultColor = {p.color.R, p.color.G, p.color.B, 0, false}
+                PartsSection:Colorpicker({
+                    Name = p.name .. " Color",
+                    Flag = flagBase .. "/Color",
+                    Value = defaultColor,
+                    Callback = function() applyAllESP() end
+                })
+            end
         end
     end
     
@@ -147,6 +189,26 @@ local highlightedObjects = {
         fillTransparency = 0.5,
     },
 }
+
+-- Mapping from part display name to flag id (used for UI flags)
+local partFlagMap = {
+    ["Ammo rack"] = "AmmoRack",
+    ["Fuel tank"] = "FuelTank",
+    ["Barrel"] = "Barrel",
+    ["Hull crew"] = "HullCrew",
+    ["Turret crew"] = "TurretCrew",
+}
+
+local function getFlagColor(flagName, defaultColor3)
+    local data = Window.Flags[flagName]
+    if type(data) == "table" and #data >= 3 then
+        return Color3.fromRGB(math.floor(data[1] * 255), math.floor(data[2] * 255), math.floor(data[3] * 255))
+    elseif typeof(data) == "Color3" then
+        return data
+    else
+        return defaultColor3
+    end
+end
 
 local function createHighlight(object, color, fillTransparency)
     if not object:IsA("BasePart") and not object:IsA("MeshPart") then return nil end
@@ -259,8 +321,19 @@ local function highlightEnemyTank(tank)
             local partName = descendant.Name
             if highlightedObjects[partName] then
                 local config = highlightedObjects[partName]
-                local hl = createHighlight(descendant, config.color, fillTransparency)
-                
+                local flagId = partFlagMap[partName]
+                local enabledFlag = flagId and Window.Flags[("ESP/Tank/Parts/%s/Enabled"):format(flagId)]
+                if enabledFlag == false then
+                    continue
+                end
+
+                local color = config.color
+                if flagId then
+                    color = getFlagColor(("ESP/Tank/Parts/%s/Color"):format(flagId), config.color)
+                end
+
+                local hl = createHighlight(descendant, color, fillTransparency)
+
                 if hl then 
                     table.insert(tankHighlights[tank], hl)
                     foundCount = foundCount + 1
@@ -303,6 +376,7 @@ local function create3DBox(tank)
         math.floor(boxColorData[3] * 255)
     )
     
+    local thicknessVal = (Window.Flags["ESP/Tank/Box/Thickness"] or 1) * 0.3
     for i, edge in ipairs(edges) do
         local part = Instance.new("Part")
         part.Name = "Edge_" .. edge[1] .. "_" .. edge[2]
@@ -312,7 +386,7 @@ local function create3DBox(tank)
         part.Material = Enum.Material.Neon
         part.Color = boxColor
         part.Transparency = 0
-        part.Size = Vector3.new(0.3, 0.3, 1)
+        part.Size = Vector3.new(thicknessVal, thicknessVal, 1)
         part.CastShadow = false
         part.Massless = true
         part.Parent = folder
@@ -370,7 +444,8 @@ local function update3DBox(tank, folder)
             local dir = p2 - p1
             local len = dir.Magnitude
             if len > 0 then
-                part.Size = Vector3.new(0.3, 0.3, len)
+                local thicknessVal = (Window.Flags["ESP/Tank/Box/Thickness"] or 1) * 0.3
+                part.Size = Vector3.new(thicknessVal, thicknessVal, len)
                 part.CFrame = CFrame.lookAt(mid, mid + dir.Unit)
             end
         end
