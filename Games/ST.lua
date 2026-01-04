@@ -1,159 +1,527 @@
+--[[
+    Tank ESP - BoxHandleAdornment Version with Parvus UI
+    - Uses BoxHandleAdornment for ESP (always visible through walls)
+    - Team-based detection
+    - Highlights specific hitbox parts only
+    - Full UI integration with Parvus Framework
+]]
+
 local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
-local PlayerService = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
-local Camera = Workspace.CurrentCamera
-local LocalPlayer = PlayerService.LocalPlayer
+-- Storage
+local tankHighlights = {}
+local boxContainers = {}
 
---local FXModule = nil
---local Functions = nil
---[[for Index, Value in pairs(getgc(true)) do
-    if type(Value) == "table" then
-        if rawget(Value, "ViewArmor") then
-            FXModule = Value
-        --elseif rawget(Value, "DisableUpperVisuals") then
-            --Functions = Value
+-- Debug
+local function debugPrint(message)
+    print("[Tank ESP] " .. message)
+end
+
+-- Highlighted parts configuration
+local highlightedObjects = {
+    ["Ammo rack"] = {
+        color = Color3.fromRGB(255, 0, 0), -- Red
+        fillTransparency = 0.5,
+    },
+    ["Fuel tank"] = {
+        color = Color3.fromRGB(255, 165, 0), -- Orange
+        fillTransparency = 0.5,
+    },
+    ["Barrel"] = {
+        color = Color3.fromRGB(0, 0, 255), -- Blue
+        fillTransparency = 0.5,
+    },
+    ["Hull crew"] = {
+        color = Color3.fromRGB(160, 32, 240), -- Purple
+        fillTransparency = 0.5,
+    },
+    ["Turret crew"] = {
+        color = Color3.fromRGB(255, 0, 255), -- Magenta
+        fillTransparency = 0.5,
+    },
+}
+
+-- Create highlight function
+local function createHighlight(object, color, fillTransparency)
+    if not object:IsA("BasePart") and not object:IsA("MeshPart") then return nil end
+    
+    local highlight = Instance.new('BoxHandleAdornment')
+    highlight.Adornee = object
+    highlight.AlwaysOnTop = true
+    highlight.ZIndex = 5
+    highlight.Size = object.Size + Vector3.new(0.1, 0.1, 0.1)
+    highlight.Color3 = color
+    highlight.Transparency = fillTransparency
+    highlight.Parent = object
+    
+    return highlight
+end
+
+-- Get all tanks
+local function getAllTanks()
+    local tanks = {}
+    for _, child in ipairs(Workspace:GetChildren()) do
+        if child:IsA("Model") then
+            local owner = child:FindFirstChild("Owner")
+            if owner and owner:IsA("StringValue") and owner.Value ~= "" then
+                table.insert(tanks, child)
+            end
         end
     end
-end]]
+    return tanks
+end
 
---local XRay = getupvalue(FXModule.xray, 2)
---local proceedArmor = getupvalue(FXModule.ViewArmor, 7)
+-- Get player from tank
+local function getPlayerFromTank(tank)
+    local owner = tank:FindFirstChild("Owner")
+    if not owner or not owner:IsA("StringValue") then 
+        return nil 
+    end
+    
+    local ownerUsername = owner.Value
+    if not ownerUsername or ownerUsername == "" then 
+        return nil 
+    end
+    
+    return Players:FindFirstChild(ownerUsername)
+end
+
+-- Check if enemy
+local function isEnemyTank(tank)
+    local tankOwner = getPlayerFromTank(tank)
+    
+    if not tankOwner then return false end
+    if tankOwner == LocalPlayer then return false end
+    
+    -- Distance check
+    if Window.Flags["ESP/Tank/DistanceCheck"] then
+        local distance = Window.Flags["ESP/Tank/Distance"] or 250
+        local main = tank:FindFirstChild("Main")
+        if main then
+            local playerPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if playerPos then
+                if (playerPos.Position - main.Position).Magnitude > distance then
+                    return false
+                end
+            end
+        end
+    end
+    
+    -- Team check
+    if Window.Flags["ESP/Tank/TeamCheck"] then
+        local myTeam = LocalPlayer.Team
+        local theirTeam = tankOwner.Team
+        
+        if not myTeam or not theirTeam then return false end
+        
+        return myTeam.Name ~= theirTeam.Name
+    end
+    
+    return true
+end
+
+-- Clear highlights for a tank
+local function clearTankHighlights(tank)
+    if tankHighlights[tank] then
+        for _, hl in pairs(tankHighlights[tank]) do
+            if hl and hl.Parent then 
+                hl:Destroy() 
+            end
+        end
+        tankHighlights[tank] = nil
+    end
+end
+
+-- Highlight enemy tank parts
+local function highlightEnemyTank(tank)
+    if not Window.Flags["ESP/Tank/Enabled"] or not Window.Flags["ESP/Tank/Hitbox"] then 
+        clearTankHighlights(tank)
+        return 
+    end
+    
+    if not isEnemyTank(tank) then 
+        clearTankHighlights(tank)
+        return 
+    end
+    
+    clearTankHighlights(tank)
+    tankHighlights[tank] = {}
+    
+    local main = tank:FindFirstChild("Main")
+    if not main then return end
+    
+    local hitboxes = main:FindFirstChild("Hitboxes")
+    if not hitboxes then return end
+    
+    local foundCount = 0
+    local fillTransparency = Window.Flags["ESP/Tank/Transparency"] or 0.5
+    
+    -- Search through ALL descendants of Hitboxes
+    for _, descendant in ipairs(hitboxes:GetDescendants()) do
+        if (descendant:IsA("MeshPart") or descendant:IsA("BasePart")) then
+            local partName = descendant.Name
+            
+            -- Check if this part should be highlighted
+            if highlightedObjects[partName] then
+                local config = highlightedObjects[partName]
+                local hl = createHighlight(descendant, config.color, fillTransparency)
+                
+                if hl then 
+                    table.insert(tankHighlights[tank], hl)
+                    foundCount = foundCount + 1
+                end
+            end
+        end
+    end
+    
+    if foundCount > 0 then
+        debugPrint("  ✓ Highlighted " .. foundCount .. " parts in " .. tank.Name)
+    end
+end
+
+-- Clear box
+local function clearBox(tank)
+    if boxContainers[tank] then
+        boxContainers[tank]:Destroy()
+        boxContainers[tank] = nil
+    end
+end
+
+-- Create 3D Box
+local function create3DBox(tank)
+    if not Window.Flags["ESP/Tank/Enabled"] or not Window.Flags["ESP/Tank/Box"] then return end
+    if boxContainers[tank] then return end
+    if not isEnemyTank(tank) then return end
+    
+    local folder = Instance.new("Folder")
+    folder.Name = "TankBoxESP"
+    folder.Parent = Workspace.CurrentCamera
+    
+    local edges = {
+        {1,2}, {2,3}, {3,4}, {4,1},
+        {5,6}, {6,7}, {7,8}, {8,5},
+        {1,5}, {2,6}, {3,7}, {4,8},
+    }
+    
+    local boxColorData = Window.Flags["ESP/Tank/BoxColor"] or {1, 1, 1, 0, false}
+    local boxColor = Color3.fromRGB(
+        math.floor(boxColorData[1] * 255),
+        math.floor(boxColorData[2] * 255),
+        math.floor(boxColorData[3] * 255)
+    )
+    
+    for i, edge in ipairs(edges) do
+        local part = Instance.new("Part")
+        part.Name = "Edge_" .. edge[1] .. "_" .. edge[2]
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanTouch = false
+        part.Material = Enum.Material.Neon
+        part.Color = boxColor
+        part.Transparency = 0
+        part.Size = Vector3.new(0.3, 0.3, 1)
+        part.CastShadow = false
+        part.Massless = true
+        part.Parent = folder
+    end
+    
+    boxContainers[tank] = folder
+end
+
+-- Update 3D Box
+local function update3DBox(tank, folder)
+    if not tank.Parent or not isEnemyTank(tank) then
+        clearBox(tank)
+        return
+    end
+    
+    local main = tank:FindFirstChild("Main")
+    local hull = main and main:FindFirstChild("Hull")
+    local boxModel = hull or main or tank
+    
+    local success, boxCF, boxSize = pcall(boxModel.GetBoundingBox, boxModel)
+    if not success then return end
+    
+    boxSize = Vector3.new(
+        math.clamp(boxSize.X, 5, 50),
+        math.clamp(boxSize.Y, 3, 20),
+        math.clamp(boxSize.Z, 5, 50)
+    )
+    
+    local half = boxSize / 2
+    
+    local corners = {
+        Vector3.new(-half.X, -half.Y, -half.Z),
+        Vector3.new( half.X, -half.Y, -half.Z),
+        Vector3.new( half.X,  half.Y, -half.Z),
+        Vector3.new(-half.X,  half.Y, -half.Z),
+        Vector3.new(-half.X, -half.Y,  half.Z),
+        Vector3.new( half.X, -half.Y,  half.Z),
+        Vector3.new( half.X,  half.Y,  half.Z),
+        Vector3.new(-half.X,  half.Y,  half.Z),
+    }
+    
+    local edges = {
+        {1,2}, {2,3}, {3,4}, {4,1},
+        {5,6}, {6,7}, {7,8}, {8,5},
+        {1,5}, {2,6}, {3,7}, {4,8},
+    }
+    
+    for i, edge in ipairs(edges) do
+        local part = folder:FindFirstChild("Edge_" .. edge[1] .. "_" .. edge[2])
+        if part then
+            local a = corners[edge[1]]
+            local b = corners[edge[2]]
+            local p1 = boxCF * a
+            local p2 = boxCF * b
+            local mid = (p1 + p2) / 2
+            local dir = p2 - p1
+            local len = dir.Magnitude
+            if len > 0 then
+                part.Size = Vector3.new(0.3, 0.3, len)
+                part.CFrame = CFrame.lookAt(mid, mid + dir.Unit)
+            end
+        end
+    end
+end
+
+-- Apply all ESP
+local function applyAllESP()
+    local tanks = getAllTanks()
+    
+    debugPrint("=== Scanning for tanks ===")
+    debugPrint("Found " .. #tanks .. " tanks")
+    
+    local myTeam = LocalPlayer.Team
+    if myTeam then
+        debugPrint("LocalPlayer team: " .. myTeam.Name)
+    else
+        debugPrint("LocalPlayer has NO TEAM")
+    end
+    
+    local validTanks = {}
+    local enemyCount = 0
+    
+    for _, tank in ipairs(tanks) do
+        validTanks[tank] = true
+        
+        local owner = getPlayerFromTank(tank)
+        if owner then
+            local ownerTeam = owner.Team
+            local ownerTeamName = ownerTeam and ownerTeam.Name or "NO TEAM"
+            local isEnemy = isEnemyTank(tank)
+            
+            debugPrint("Tank: " .. tank.Name .. " | Owner: " .. owner.Name .. " | Team: " .. ownerTeamName .. " | Enemy: " .. tostring(isEnemy))
+            
+            if isEnemy then
+                enemyCount = enemyCount + 1
+                highlightEnemyTank(tank)
+                create3DBox(tank)
+            else
+                clearTankHighlights(tank)
+                clearBox(tank)
+            end
+        end
+    end
+    
+    debugPrint("=== Highlighted " .. enemyCount .. " enemies ===")
+    
+    -- Cleanup removed tanks
+    for tank, _ in pairs(tankHighlights) do
+        if not validTanks[tank] then
+            clearTankHighlights(tank)
+        end
+    end
+    
+    for tank, folder in pairs(boxContainers) do
+        if not validTanks[tank] then
+            clearBox(tank)
+        end
+    end
+end
+
+-- Validate ESP
+local function validateESP()
+    for tank, _ in pairs(tankHighlights) do
+        if not tank or not tank.Parent or not isEnemyTank(tank) then
+            clearTankHighlights(tank)
+            clearBox(tank)
+        end
+    end
+end
+
+-- Handle new tanks being added
+Workspace.ChildAdded:Connect(function(child)
+    task.wait(0.5) -- Wait for tank to fully load
+    if child:IsA("Model") and child:FindFirstChild("Owner") then
+        local owner = getPlayerFromTank(child)
+        if owner and isEnemyTank(child) then
+            debugPrint("New enemy tank detected: " .. child.Name)
+            highlightEnemyTank(child)
+            create3DBox(child)
+        end
+    end
+end)
+
+-- Update loop
+RunService.RenderStepped:Connect(function()
+    for tank, folder in pairs(boxContainers) do
+        if folder and folder.Parent then
+            update3DBox(tank, folder)
+        end
+    end
+    
+    validateESP()
+end)
+
+-- Periodic refresh
+task.spawn(function()
+    while true do
+        task.wait(3)
+        applyAllESP()
+    end
+end)
+
+-- Fast validation
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        validateESP()
+    end
+end)
+
+-- Initial start
+task.wait(1.5)
+debugPrint("========================================")
+debugPrint("Tank ESP Starting with BoxHandleAdornment...")
+debugPrint("========================================")
+applyAllESP()
+debugPrint("========================================")
+debugPrint("Tank ESP Active!")
+debugPrint("Colors:")
+debugPrint("  Red = Ammo Rack")
+debugPrint("  Orange = Fuel Tank")
+debugPrint("  Blue = Barrel")
+debugPrint("  Purple = Hull Crew")
+debugPrint("  Green = Drivetrain")
+debugPrint("  Magenta = Turret Crew")
+debugPrint("  Yellow = Turret Drive")
+debugPrint("  Light Blue = Tracks")
+debugPrint("========================================")
+
+-- ============================================================
+-- PARVUS UI FRAMEWORK INTEGRATION
+-- ============================================================
 
 local Window = Parvus.Utilities.UI:Window({
     Name = ("Parvus Hub %s %s"):format(utf8.char(8212), Parvus.Game.Name),
-    Position = UDim2.new(0.5, -173 * 3, 0.5, -173), Size = UDim2.new(0, 346, 0, 346)
+    Position = UDim2.new(0.5, -173 * 3, 0.5, -173), 
+    Size = UDim2.new(0, 346, 0, 346)
 }) do
 
-    local VisualsSection = Parvus.Utilities:ESPSection(Window, "Visuals", "ESP/Player", true, true, false, false, true, false) do
-        VisualsSection:Colorpicker({Name = "Ally Color", Flag = "ESP/Player/Ally", Value = {0.3333333432674408, 0.6666666269302368, 1, 0, false}})
-        VisualsSection:Colorpicker({Name = "Enemy Color", Flag = "ESP/Player/Enemy", Value = {1, 0.6666666269302368, 1, 0, false}})
-        VisualsSection:Toggle({Name = "Team Check", Flag = "ESP/Player/TeamCheck", Value = true})
-        VisualsSection:Toggle({Name = "Use Team Color", Flag = "ESP/Player/TeamColor", Value = false})
-        VisualsSection:Toggle({Name = "Distance Check", Flag = "ESP/Player/DistanceCheck", Value = false})
-        VisualsSection:Slider({Name = "Distance", Flag = "ESP/Player/Distance", Min = 25, Max = 1000, Value = 250, Unit = "studs"})
-    end
-    --[[local MiscTab = Window:Tab({Name = "Miscellaneous"}) do
-        local FlySection = MiscTab:Section({Name = "Fly", Side = "Left"}) do
-            FlySection:Toggle({Name = "Enabled", Flag = "ST/Fly/Enabled", Value = false}):Keybind()
-            FlySection:Toggle({Name = "Attach To Camera", Flag = "ST/Fly/Camera", Value = true})
-            FlySection:Slider({Name = "Speed", Flag = "ST/Fly/Speed", Min = 100, Max = 500, Value = 100})
-        end
-        local MiscSection = MiscTab:Section({Name = "Other", Side = "Right"}) do
-            MiscSection:Toggle({Name = "XRay", Flag = "ST/XRay", Value = false, Callback = function(Bool)
-                local NumBool = Bool and 1 or 0
-                for Index, Child in pairs(Workspace:GetChildren()) do
-                    if Child:FindFirstChild("Owner") and
-                    Child.Owner.Value ~= LocalPlayer.Name
-                    and Child.Alive.Value then
-                        proceedArmor(Child, NumBool, 0)
-                        --FXModule.ViewArmor(Child, NumBool, 0)
-                        --XRay(Child.Main.Hitboxes, Bool, 1)
-                        --Functions.DisableUpperVisuals(Child)
+    local VisualsSection = Parvus.Utilities:ESPSection(Window, "Tank ESP", "ESP/Tank", true, true, false, false, true, false) do
+        VisualsSection:Toggle({
+            Name = "Tank ESP Enabled", 
+            Flag = "ESP/Tank/Enabled", 
+            Value = true,
+            Callback = function(Bool)
+                if not Bool then
+                    for tank, _ in pairs(tankHighlights) do
+                        clearTankHighlights(tank)
+                        clearBox(tank)
                     end
+                else
+                    applyAllESP()
                 end
-            end}):Keybind()
-        end
-    end]] Parvus.Utilities:SettingsSection(Window, "RightShift", false)
-end Parvus.Utilities.InitAutoLoad(Window)
+            end
+        })
+        
+        VisualsSection:Toggle({
+            Name = "3D Box ESP", 
+            Flag = "ESP/Tank/Box", 
+            Value = true,
+            Callback = function(Bool)
+                if not Bool then
+                    for tank, folder in pairs(boxContainers) do
+                        clearBox(tank)
+                    end
+                else
+                    applyAllESP()
+                end
+            end
+        })
+        
+        VisualsSection:Toggle({
+            Name = "Hitbox Highlights", 
+            Flag = "ESP/Tank/Hitbox", 
+            Value = true,
+            Callback = function(Bool)
+                if not Bool then
+                    for tank, _ in pairs(tankHighlights) do
+                        clearTankHighlights(tank)
+                    end
+                else
+                    applyAllESP()
+                end
+            end
+        })
+        
+        VisualsSection:Toggle({
+            Name = "Team Check", 
+            Flag = "ESP/Tank/TeamCheck", 
+            Value = true,
+            Callback = function(Bool)
+                applyAllESP()
+            end
+        })
+        
+        VisualsSection:Toggle({
+            Name = "Distance Check", 
+            Flag = "ESP/Tank/DistanceCheck", 
+            Value = false,
+            Callback = function(Bool)
+                applyAllESP()
+            end
+        })
+        
+        VisualsSection:Slider({
+            Name = "Distance", 
+            Flag = "ESP/Tank/Distance", 
+            Min = 25, 
+            Max = 1000, 
+            Value = 250, 
+            Unit = "studs",
+            Callback = function(Value)
+                applyAllESP()
+            end
+        })
+        
+        VisualsSection:Slider({
+            Name = "Fill Transparency", 
+            Flag = "ESP/Tank/Transparency", 
+            Min = 0, 
+            Max = 1, 
+            Value = 0.5,
+            Callback = function(Value)
+                applyAllESP()
+            end
+        })
+        
+        VisualsSection:Colorpicker({
+            Name = "Box Color", 
+            Flag = "ESP/Tank/BoxColor", 
+            Value = {1, 1, 1, 0, false}
+        })
+    end
+    
+    Parvus.Utilities:SettingsSection(Window, "RightShift", false)
+end
 
+Parvus.Utilities.InitAutoLoad(Window)
 Parvus.Utilities:SetupWatermark(Window)
 Parvus.Utilities.Drawing.SetupCursor(Window)
 Parvus.Utilities.Drawing.SetupCrosshair(Window.Flags)
-
--- Fly Logic
---[[local XZ, YPlus, YMinus = Vector3.new(1, 0, 1), Vector3.new(0, 1, 0), Vector3.new(0, -1, 0)
-local function FixUnit(Vector) if Vector.Magnitude == 0 then return Vector3.zero end return Vector.Unit end
-local function FlatCameraVector(CameraCF) return CameraCF.LookVector * XZ, CameraCF.RightVector * XZ end
-local function InputToVelocity() local LookVector, RightVector = FlatCameraVector(Camera.CFrame)
-    local Forward  = UserInputService:IsKeyDown(Enum.KeyCode.W) and LookVector or Vector3.zero
-    local Backward = UserInputService:IsKeyDown(Enum.KeyCode.S) and -LookVector or Vector3.zero
-    local Left     = UserInputService:IsKeyDown(Enum.KeyCode.A) and -RightVector or Vector3.zero
-    local Right    = UserInputService:IsKeyDown(Enum.KeyCode.D) and RightVector or Vector3.zero
-    local Up       = UserInputService:IsKeyDown(Enum.KeyCode.Space) and YPlus or Vector3.zero
-    local Down     = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) and YMinus or Vector3.zero
-    return FixUnit(Forward + Backward + Left + Right + Up + Down)
-end]]
-
---[[local function GetPlayerTank(Player)
-    local Char = Player:WaitForChild("Char")
-    if not Char then return end
-    if not Char.Value then return end
-    return Char.Value.Parent.Parent.Parent
-end
-
-local function PlayerFly(Enabled, Speed, EnableCamera)
-    if not Enabled then return end
-    local LPTank = GetPlayerTank(LocalPlayer)
-    if LPTank and LPTank.PrimaryPart then
-        LPTank.PrimaryPart.AssemblyLinearVelocity = Parvus.Utilities.MovementToDirection() * Speed
-
-        if not EnableCamera then return end
-        LPTank.PrimaryPart.CFrame = LPTank.PrimaryPart.CFrame * Camera.CFrame.Rotation
-        --LPTank:PivotTo(CFrame.new(LPTank:GetPivot().Position) * Camera.CFrame.Rotation)
-    end
-end]]
-
---[[local OldNamecall = nil
-OldNamecall = hookmetamethod(game, "__namecall", function(Self, ...)
-    local Method, Args = getnamecallmethod(), {...}
-    if Method == "FireServer" then
-        if Self.Name == "XEvent" then
-            return
-        end
-    elseif Method == "addItem" then
-        if Args[1] == BodyVelocity
-        or Args[1] == BodyGyro then
-            return
-        end
-    end
-
-    return OldNamecall(Self, ...)
-end)]]
-
---[[Parvus.Utilities.NewThreadLoop(0, function()
-    PlayerFly(
-        Window.Flags["ST/Fly/Enabled"],
-        Window.Flags["ST/Fly/Speed"],
-        Window.Flags["ST/Fly/Camera"]
-    )
-end)]]
-
---[[for Index, Child in pairs(Workspace:GetChildren()) do
-    if not Window.Flags["ST/XRay"] then continue end
-    if Child:FindFirstChild("Owner") and
-    Child.Owner.Value ~= LocalPlayer.Name
-    and Child.Alive.Value then
-        proceedArmor(Child, 1, 0)
-        --FXModule.ViewArmor(Child, 1, 0)
-        --XRay(Child.Main.Hitboxes, true, 1)
-        --Functions.DisableUpperVisuals(Child)
-    end
-end
-
-Workspace.ChildAdded:Connect(function(Child)
-    if not Window.Flags["ST/XRay"] then return end
-    task.wait(0.5) if Child:FindFirstChild("Owner") and
-    Child.Owner.Value ~= LocalPlayer.Name then
-        proceedArmor(Child, 1, 0)
-        --FXModule.ViewArmor(Child, 1, 0)
-        --XRay(Child.Main.Hitboxes, true, 1)
-        --Functions.DisableUpperVisuals(Child)
-    end
-end)]]
-
-Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-    Camera = Workspace.CurrentCamera
-end)
-
-for Index, Player in pairs(PlayerService:GetPlayers()) do
-    if Player == LocalPlayer then continue end
-    Parvus.Utilities.Drawing:AddESP(Player, "Player", "ESP/Player", Window.Flags)
-end
-PlayerService.PlayerAdded:Connect(function(Player)
-    Parvus.Utilities.Drawing:AddESP(Player, "Player", "ESP/Player", Window.Flags)
-end)
-PlayerService.PlayerRemoving:Connect(function(Player)
-    Parvus.Utilities.Drawing:RemoveESP(Player)
-end)
