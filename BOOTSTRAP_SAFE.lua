@@ -1,4 +1,3 @@
--- Safe bootstrap to load Varus without relying solely on game:HttpGet or loadstring
 local IsDevelopmentBranch, NotificationTime = false,5
 local Branch = IsDevelopmentBranch and "development" or "main"
 local Source = "https://raw.githubusercontent.com/hendodev/Varus/" .. Branch .. "/Loader.lua"
