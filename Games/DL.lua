@@ -58,7 +58,9 @@ local Cache = {
     ConfirmedEnemies = {},
     EnemyConfirmations = {},
     FriendlyIndicators = {},
-    LastFriendlyUpdate = {}
+    LastFriendlyUpdate = {},
+    WallChecks = {},
+    ClosestEnemy = nil
 }
 
 local ESP = {
@@ -309,6 +311,21 @@ local function IsChecking(model)
     return true
 end
 
+local function CheckWall(model)
+    local myRoot = GetLocalRoot()
+    if not myRoot then return false end
+    
+    local targetRoot = GetRoot(model)
+    if not targetRoot then return false end
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, model}
+    
+    local raycastResult = Workspace:Raycast(myRoot.Position, (targetRoot.Position - myRoot.Position), raycastParams)
+    
+    return raycastResult == nil
+end
 
 local function GetPlayerStatus(model)
     local Window = getgenv().Window
@@ -338,11 +355,47 @@ local function GetPlayerStatus(model)
     end
     
     if not Window.Flags["ESP/TeamCheck"] then
+        local isInOpen = false
+        if Window.Flags["ESP/WallCheck"] then
+            isInOpen = CheckWall(model)
+        end
+        
+        local isClosest = (Cache.ClosestEnemy == model)
+        if Window.Flags["ESP/ClosestEnemy"] and isClosest then
+            if isInOpen then
+                return "neutral", Color3.fromRGB(0, 255, 0)
+            else
+                return "neutral", Color3.fromRGB(200, 0, 255)
+            end
+        end
+        
+        if isInOpen then
+            return "neutral", Color3.fromRGB(0, 255, 0)
+        end
+        
         return "neutral", enemyColor
     end
     
     if Cache.Friendlies[model] == true then
         return "friendly", friendlyColor
+    end
+    
+    local isInOpen = false
+    if Window.Flags["ESP/WallCheck"] then
+        isInOpen = CheckWall(model)
+    end
+    
+    local isClosest = (Cache.ClosestEnemy == model)
+    if Window.Flags["ESP/ClosestEnemy"] and isClosest then
+        if isInOpen then
+            return "enemy", Color3.fromRGB(0, 255, 0)
+        else
+            return "enemy", Color3.fromRGB(200, 0, 255)
+        end
+    end
+    
+    if isInOpen then
+        return "enemy", Color3.fromRGB(0, 255, 0)
     end
     
     return "enemy", enemyColor
@@ -893,7 +946,7 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
             line.From = Vector2.new(fromScreen.X, fromScreen.Y)
             line.To = Vector2.new(toScreen.X, toScreen.Y)
             
-            local skeletonColor = Color3.fromRGB(255, 255, 255)
+            local skeletonColor = color
             if Window.Flags["ESP/SkeletonColor"] then
                 local colorData = Window.Flags["ESP/SkeletonColor"]
                 if type(colorData) == "table" and colorData[6] then
@@ -1145,6 +1198,11 @@ local function ProcessAimbot(cam, screenCenter)
     local mousePos = UserInputService:GetMouseLocation()
     local isHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     
+    local cameraFOV = Window.Flags["AIM/CameraFOV"] or 70
+    if cam.FieldOfView ~= cameraFOV then
+        cam.FieldOfView = cameraFOV
+    end
+    
     FOVCircle.Position = mousePos
     FOVCircle.Radius = Window.Flags["AIM/FOV"] or 180
     FOVCircle.Visible = Window.Flags["AIM/Enabled"] and Window.Flags["AIM/ShowFOV"]
@@ -1320,6 +1378,9 @@ local function MainLoop()
     if Window.Flags["ESP/Enabled"] then
         local myPos = GetLocalPosition()
         
+        Cache.ClosestEnemy = nil
+        local closestDist = math.huge
+        
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
@@ -1329,6 +1390,17 @@ local function MainLoop()
             
             local root = GetRoot(model)
             if not root then continue end
+            
+            local rootPos = root.Position
+            local distVec = rootPos - myPos
+            local dist = distVec.Magnitude
+            
+            if Window.Flags["ESP/ClosestEnemy"] then
+                if dist < closestDist then
+                    closestDist = dist
+                    Cache.ClosestEnemy = model
+                end
+            end
             
             local espObj = GetPooledESP()
             RenderESP(espObj, model, cam, screenSize, screenCenter, myPos)
@@ -1497,6 +1569,8 @@ local function Initialize()
             ESPSettingsSection:Toggle({Name = "Name", Flag = "ESP/Name", Value = true})
             ESPSettingsSection:Toggle({Name = "Distance", Flag = "ESP/Distance", Value = true})
             ESPSettingsSection:Toggle({Name = "Skeleton", Flag = "ESP/Skeleton", Value = false})
+            ESPSettingsSection:Toggle({Name = "Wall Check", Flag = "ESP/WallCheck", Value = false})
+            ESPSettingsSection:Toggle({Name = "Closest Enemy", Flag = "ESP/ClosestEnemy", Value = false})
             ESPSettingsSection:Slider({Name = "Skeleton Thickness", Flag = "ESP/SkeletonThickness", Min = 1, Max = 5, Value = 1.5, Precise = 1})
             ESPSettingsSection:Slider({Name = "Max Distance", Flag = "ESP/MaxDistance", Min = 500, Max = 3000, Value = 500, Step = 50})
             ESPSettingsSection:Toggle({Name = "Tracer", Flag = "ESP/Tracer", Value = false})
@@ -1535,6 +1609,7 @@ local function Initialize()
             AimbotSection:Toggle({Name = "Show FOV", Flag = "AIM/ShowFOV", Value = true})
             AimbotSection:Slider({Name = "FOV Size", Flag = "AIM/FOV", Min = 50, Max = 400, Value = 180, Step = 10})
             AimbotSection:Slider({Name = "Smoothness", Flag = "AIM/Smooth", Min = 0.05, Max = 0.5, Value = 0.18, Precise = 2})
+            AimbotSection:Slider({Name = "Camera FOV", Flag = "AIM/CameraFOV", Min = 70, Max = 120, Value = 70, Step = 1})
             AimbotSection:Dropdown({Name = "Target Part", Flag = "AIM/TargetPart", List = {
                 {Name = "Head", Mode = "Button", Value = true},
                 {Name = "Torso", Mode = "Button"},
@@ -1681,6 +1756,8 @@ local function Initialize()
         Cache.ConfirmedEnemies = {}
         Cache.EnemyConfirmations = {}
         Cache.LastFriendlyUpdate = {}
+        Cache.WallChecks = {}
+        Cache.ClosestEnemy = nil
         State.LastTeamScan = 0
         State.LastCache = 0
     end)
@@ -1693,6 +1770,8 @@ local function Initialize()
         Cache.ConfirmedEnemies = {}
         Cache.EnemyConfirmations = {}
         Cache.LastFriendlyUpdate = {}
+        Cache.WallChecks = {}
+        Cache.ClosestEnemy = nil
     end)
 end
 
