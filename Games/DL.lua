@@ -58,9 +58,7 @@ local Cache = {
     ConfirmedEnemies = {},
     EnemyConfirmations = {},
     FriendlyIndicators = {},
-    LastFriendlyUpdate = {},
-    WallChecks = {},
-    ClosestEnemy = nil
+    LastFriendlyUpdate = {}
 }
 
 local ESP = {
@@ -171,6 +169,45 @@ local function ScanFriendlyIndicators()
     end
 end
 
+local function VerifyFriendlyByTeam(model)
+    local Teams = game:GetService("Teams")
+    local LocalPlayer = Players.LocalPlayer
+    local myTeam = LocalPlayer.Team
+    
+    if not myTeam then return false end
+    
+    local root = GetRoot(model)
+    if not root then return false end
+    
+    local modelPos = root.Position
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Team == myTeam and player ~= LocalPlayer and player.Character then
+            local charRoot = player.Character:FindFirstChild("HumanoidRootPart") or player.Character:FindFirstChild("humanoid_root_part")
+            if charRoot then
+                local dist = (charRoot.Position - modelPos).Magnitude
+                if dist < 2 then
+                    return true
+                end
+            end
+        end
+    end
+    
+    local success, result = pcall(function()
+        if model:FindFirstChild("Team") then
+            local modelTeam = model.Team
+            if typeof(modelTeam) == "Instance" and modelTeam:IsA("Team") then
+                return (modelTeam == myTeam)
+            elseif typeof(modelTeam) == "string" then
+                return (modelTeam == myTeam.Name)
+            end
+        end
+        return false
+    end)
+    
+    return success and result == true
+end
+
 local function DetectTeammates()
     local Window = getgenv().Window
     if not Window or Window.Flags["ESP/TeamCheck"] then return end
@@ -181,53 +218,16 @@ local function DetectTeammates()
     
     if not myTeam then return end
     
-    local myTeamPlayers = {}
-    for _, player in pairs(Players:GetPlayers()) do
-        if player.Team == myTeam and player ~= LocalPlayer then
-            myTeamPlayers[player] = true
-        end
-    end
-    
     for model in pairs(Cache.Soldiers) do
         if not IsValidModel(model) then continue end
         
-        local root = GetRoot(model)
-        if not root then continue end
-        
-        local modelPos = root.Position
-        local isTeammate = false
-        
-        for player, _ in pairs(myTeamPlayers) do
-            if player.Character then
-                local charRoot = player.Character:FindFirstChild("HumanoidRootPart") or player.Character:FindFirstChild("humanoid_root_part")
-                if charRoot then
-                    local dist = (charRoot.Position - modelPos).Magnitude
-                    if dist < 2 then
-                        isTeammate = true
-                        break
-                    end
-                end
-            end
-        end
-        
-        if not isTeammate then
-            pcall(function()
-                if model:FindFirstChild("Team") then
-                    local modelTeam = model.Team
-                    if typeof(modelTeam) == "Instance" and modelTeam:IsA("Team") then
-                        isTeammate = (modelTeam == myTeam)
-                    elseif typeof(modelTeam) == "string" then
-                        isTeammate = (modelTeam == myTeam.Name)
-                    end
-                end
-            end)
-        end
+        local isTeammate = VerifyFriendlyByTeam(model)
         
         if isTeammate then
             Cache.Friendlies[model] = true
             Cache.ConfirmedEnemies[model] = nil
             Cache.EnemyConfirmations[model] = 0
-            Cache.FriendlyScores[model] = 8
+            Cache.FriendlyScores[model] = 10
         else
             if Cache.Friendlies[model] then
                 Cache.Friendlies[model] = nil
@@ -257,36 +257,65 @@ local function UpdateFriendlyStatus()
         if not IsValidModel(model) then
             Cache.Friendlies[model] = nil
             Cache.ConfirmedEnemies[model] = nil
+            Cache.EnemyConfirmations[model] = 0
             continue
         end
         
         local root = GetRoot(model)
         if not root then continue end
         
-        local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
+        local friendlyScore = Cache.FriendlyScores[model] or 0
+        local isFriendlyByTeam = VerifyFriendlyByTeam(model)
         
-        if not onScreen or screenPos.Z <= 0 then
+        if isFriendlyByTeam then
+            Cache.Friendlies[model] = true
+            Cache.ConfirmedEnemies[model] = nil
+            Cache.EnemyConfirmations[model] = 0
+            Cache.FriendlyScores[model] = 10
             continue
         end
         
-        local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
-        local foundIndicator = false
+        local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
         
-        for i = 1, #Cache.FriendlyIndicators do
-            local indicator = Cache.FriendlyIndicators[i]
-            local dist = (indicator - screenPos2D).Magnitude
-            if dist < 120 then
-                foundIndicator = true
-                break
+        if onScreen and screenPos.Z > 0 then
+            local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
+            local foundIndicator = false
+            
+            for i = 1, #Cache.FriendlyIndicators do
+                local indicator = Cache.FriendlyIndicators[i]
+                local dist = (indicator - screenPos2D).Magnitude
+                if dist < 120 then
+                    foundIndicator = true
+                    break
+                end
+            end
+            
+            if foundIndicator then
+                Cache.Friendlies[model] = true
+                Cache.ConfirmedEnemies[model] = nil
+                Cache.EnemyConfirmations[model] = 0
+                Cache.FriendlyScores[model] = 10
+                continue
             end
         end
         
-        if foundIndicator then
-            Cache.Friendlies[model] = true
-            Cache.ConfirmedEnemies[model] = nil
+        if Cache.Friendlies[model] == true then
+            friendlyScore = math.max(0, friendlyScore - 1)
+            Cache.FriendlyScores[model] = friendlyScore
+            
+            if friendlyScore <= 0 then
+                Cache.EnemyConfirmations[model] = (Cache.EnemyConfirmations[model] or 0) + 1
+                
+                if Cache.EnemyConfirmations[model] >= 3 then
+                    Cache.Friendlies[model] = nil
+                end
+            end
         else
-            Cache.Friendlies[model] = nil
-            Cache.ConfirmedEnemies[model] = true
+            Cache.EnemyConfirmations[model] = (Cache.EnemyConfirmations[model] or 0) + 1
+            
+            if Cache.EnemyConfirmations[model] >= 5 then
+                Cache.ConfirmedEnemies[model] = true
+            end
         end
     end
 end
@@ -299,8 +328,21 @@ local function IsFriendly(model)
         return Cache.Friendlies[model] == true
     end
     
+    if Cache.Friendlies[model] == true then
+        return true
+    end
+    
+    if VerifyFriendlyByTeam(model) then
+        Cache.Friendlies[model] = true
+        Cache.ConfirmedEnemies[model] = nil
+        Cache.EnemyConfirmations[model] = 0
+        Cache.FriendlyScores[model] = 10
+        return true
+    end
+    
     if Cache.ConfirmedEnemies[model] then return false end
-    return Cache.Friendlies[model] == true
+    
+    return false
 end
 
 local function IsChecking(model)
@@ -309,22 +351,6 @@ local function IsChecking(model)
     if Cache.ConfirmedEnemies[model] then return false end
     if Cache.Friendlies[model] == true then return false end
     return true
-end
-
-local function CheckWall(model)
-    local myRoot = GetLocalRoot()
-    if not myRoot then return false end
-    
-    local targetRoot = GetRoot(model)
-    if not targetRoot then return false end
-    
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, model}
-    
-    local raycastResult = Workspace:Raycast(myRoot.Position, (targetRoot.Position - myRoot.Position), raycastParams)
-    
-    return raycastResult == nil
 end
 
 local function GetPlayerStatus(model)
@@ -355,47 +381,11 @@ local function GetPlayerStatus(model)
     end
     
     if not Window.Flags["ESP/TeamCheck"] then
-        local isInOpen = false
-        if Window.Flags["ESP/WallCheck"] then
-            isInOpen = CheckWall(model)
-        end
-        
-        local isClosest = (Cache.ClosestEnemy == model)
-        if Window.Flags["ESP/ClosestEnemy"] and isClosest then
-            if isInOpen then
-                return "neutral", Color3.fromRGB(0, 255, 0)
-            else
-                return "neutral", Color3.fromRGB(200, 0, 255)
-            end
-        end
-        
-        if isInOpen then
-            return "neutral", Color3.fromRGB(0, 255, 0)
-        end
-        
         return "neutral", enemyColor
     end
     
     if Cache.Friendlies[model] == true then
         return "friendly", friendlyColor
-    end
-    
-    local isInOpen = false
-    if Window.Flags["ESP/WallCheck"] then
-        isInOpen = CheckWall(model)
-    end
-    
-    local isClosest = (Cache.ClosestEnemy == model)
-    if Window.Flags["ESP/ClosestEnemy"] and isClosest then
-        if isInOpen then
-            return "enemy", Color3.fromRGB(0, 255, 0)
-        else
-            return "enemy", Color3.fromRGB(200, 0, 255)
-        end
-    end
-    
-    if isInOpen then
-        return "enemy", Color3.fromRGB(0, 255, 0)
     end
     
     return "enemy", enemyColor
@@ -946,7 +936,7 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
             line.From = Vector2.new(fromScreen.X, fromScreen.Y)
             line.To = Vector2.new(toScreen.X, toScreen.Y)
             
-            local skeletonColor = color
+            local skeletonColor = Color3.fromRGB(255, 255, 255)
             if Window.Flags["ESP/SkeletonColor"] then
                 local colorData = Window.Flags["ESP/SkeletonColor"]
                 if type(colorData) == "table" and colorData[6] then
@@ -1198,11 +1188,6 @@ local function ProcessAimbot(cam, screenCenter)
     local mousePos = UserInputService:GetMouseLocation()
     local isHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     
-    local cameraFOV = Window.Flags["AIM/CameraFOV"] or 70
-    if cam.FieldOfView ~= cameraFOV then
-        cam.FieldOfView = cameraFOV
-    end
-    
     FOVCircle.Position = mousePos
     FOVCircle.Radius = Window.Flags["AIM/FOV"] or 180
     FOVCircle.Visible = Window.Flags["AIM/Enabled"] and Window.Flags["AIM/ShowFOV"]
@@ -1378,9 +1363,6 @@ local function MainLoop()
     if Window.Flags["ESP/Enabled"] then
         local myPos = GetLocalPosition()
         
-        Cache.ClosestEnemy = nil
-        local closestDist = math.huge
-        
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
@@ -1390,17 +1372,6 @@ local function MainLoop()
             
             local root = GetRoot(model)
             if not root then continue end
-            
-            local rootPos = root.Position
-            local distVec = rootPos - myPos
-            local dist = distVec.Magnitude
-            
-            if Window.Flags["ESP/ClosestEnemy"] then
-                if dist < closestDist then
-                    closestDist = dist
-                    Cache.ClosestEnemy = model
-                end
-            end
             
             local espObj = GetPooledESP()
             RenderESP(espObj, model, cam, screenSize, screenCenter, myPos)
@@ -1569,8 +1540,6 @@ local function Initialize()
             ESPSettingsSection:Toggle({Name = "Name", Flag = "ESP/Name", Value = true})
             ESPSettingsSection:Toggle({Name = "Distance", Flag = "ESP/Distance", Value = true})
             ESPSettingsSection:Toggle({Name = "Skeleton", Flag = "ESP/Skeleton", Value = false})
-            ESPSettingsSection:Toggle({Name = "Wall Check", Flag = "ESP/WallCheck", Value = false})
-            ESPSettingsSection:Toggle({Name = "Closest Enemy", Flag = "ESP/ClosestEnemy", Value = false})
             ESPSettingsSection:Slider({Name = "Skeleton Thickness", Flag = "ESP/SkeletonThickness", Min = 1, Max = 5, Value = 1.5, Precise = 1})
             ESPSettingsSection:Slider({Name = "Max Distance", Flag = "ESP/MaxDistance", Min = 500, Max = 3000, Value = 500, Step = 50})
             ESPSettingsSection:Toggle({Name = "Tracer", Flag = "ESP/Tracer", Value = false})
@@ -1609,7 +1578,6 @@ local function Initialize()
             AimbotSection:Toggle({Name = "Show FOV", Flag = "AIM/ShowFOV", Value = true})
             AimbotSection:Slider({Name = "FOV Size", Flag = "AIM/FOV", Min = 50, Max = 400, Value = 180, Step = 10})
             AimbotSection:Slider({Name = "Smoothness", Flag = "AIM/Smooth", Min = 0.05, Max = 0.5, Value = 0.18, Precise = 2})
-            AimbotSection:Slider({Name = "Camera FOV", Flag = "AIM/CameraFOV", Min = 70, Max = 120, Value = 70, Step = 1})
             AimbotSection:Dropdown({Name = "Target Part", Flag = "AIM/TargetPart", List = {
                 {Name = "Head", Mode = "Button", Value = true},
                 {Name = "Torso", Mode = "Button"},
@@ -1756,8 +1724,6 @@ local function Initialize()
         Cache.ConfirmedEnemies = {}
         Cache.EnemyConfirmations = {}
         Cache.LastFriendlyUpdate = {}
-        Cache.WallChecks = {}
-        Cache.ClosestEnemy = nil
         State.LastTeamScan = 0
         State.LastCache = 0
     end)
@@ -1770,8 +1736,6 @@ local function Initialize()
         Cache.ConfirmedEnemies = {}
         Cache.EnemyConfirmations = {}
         Cache.LastFriendlyUpdate = {}
-        Cache.WallChecks = {}
-        Cache.ClosestEnemy = nil
     end)
 end
 
