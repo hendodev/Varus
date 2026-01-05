@@ -58,7 +58,9 @@ local Cache = {
     ConfirmedEnemies = {},
     EnemyConfirmations = {},
     FriendlyIndicators = {},
-    LastFriendlyUpdate = {}
+    LastFriendlyUpdate = {},
+    WallCheckResults = {},
+    ClosestEnemy = nil
 }
 
 local ESP = {
@@ -240,6 +242,8 @@ local function ClearTeamCache()
     Cache.ConfirmedEnemies = {}
     Cache.EnemyConfirmations = {}
     Cache.LastFriendlyUpdate = {}
+    Cache.WallCheckResults = {}
+    Cache.ClosestEnemy = nil
 end
 
 local function UpdateFriendlyStatus()
@@ -363,6 +367,21 @@ local function IsChecking(model)
     return true
 end
 
+local function CheckWallBetween(from, to)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    
+    local direction = (to - from)
+    local distance = direction.Magnitude
+    local ray = Workspace:Raycast(from, direction)
+    
+    if not ray then return true end
+    
+    local hitDistance = (ray.Position - from).Magnitude
+    return hitDistance >= distance * 0.95
+end
+
 local function GetPlayerStatus(model)
     local Window = getgenv().Window
     if not Window then
@@ -401,10 +420,64 @@ local function GetPlayerStatus(model)
     end
     
     if not Window.Flags["ESP/TeamCheck"] then
+        if Window.Flags["ESP/WallCheck"] then
+            local root = GetRoot(model)
+            if root then
+                local localRoot = GetLocalRoot()
+                if localRoot then
+                    local isInOpen = Cache.WallCheckResults[model]
+                    if isInOpen then
+                        return "neutral", Color3.fromRGB(0, 255, 0)
+                    end
+                end
+            end
+        end
+        
+        if Window.Flags["ESP/ClosestEnemy"] and Cache.ClosestEnemy == model then
+            local root = GetRoot(model)
+            if root then
+                local localRoot = GetLocalRoot()
+                if localRoot and Window.Flags["ESP/WallCheck"] then
+                    local isInOpen = Cache.WallCheckResults[model]
+                    if isInOpen then
+                        return "neutral", Color3.fromRGB(0, 255, 0)
+                    end
+                end
+                return "neutral", Color3.fromRGB(255, 0, 255)
+            end
+        end
+        
         return "neutral", enemyColor
     end
     
     if Cache.ConfirmedEnemies[model] then
+        if Window.Flags["ESP/WallCheck"] then
+            local root = GetRoot(model)
+            if root then
+                local localRoot = GetLocalRoot()
+                if localRoot then
+                    local isInOpen = Cache.WallCheckResults[model]
+                    if isInOpen then
+                        return "enemy", Color3.fromRGB(0, 255, 0)
+                    end
+                end
+            end
+        end
+        
+        if Window.Flags["ESP/ClosestEnemy"] and Cache.ClosestEnemy == model then
+            local root = GetRoot(model)
+            if root then
+                local localRoot = GetLocalRoot()
+                if localRoot and Window.Flags["ESP/WallCheck"] then
+                    local isInOpen = Cache.WallCheckResults[model]
+                    if isInOpen then
+                        return "enemy", Color3.fromRGB(0, 255, 0)
+                    end
+                end
+                return "enemy", Color3.fromRGB(255, 0, 255)
+            end
+        end
+        
         return "enemy", enemyColor
     end
     
@@ -433,11 +506,6 @@ local function CreateESPObject()
         Distance = Drawing.new("Text"),
         Tracer = Drawing.new("Line"),
         Fill = Drawing.new("Square"),
-        HealthBar = {
-            Outline = Drawing.new("Square"),
-            Fill = Drawing.new("Square"),
-            Text = Drawing.new("Text")
-        },
         Skeleton = {
             Head = Drawing.new("Line"),
             UpperSpine = Drawing.new("Line"),
@@ -493,16 +561,6 @@ local function CreateESPObject()
     obj.Fill.Transparency = 0.15
     obj.Fill.Visible = false
     
-    obj.HealthBar.Outline.Filled = false
-    obj.HealthBar.Outline.Thickness = 1
-    obj.HealthBar.Outline.Visible = false
-    obj.HealthBar.Fill.Filled = true
-    obj.HealthBar.Fill.Visible = false
-    obj.HealthBar.Text.Size = 12
-    obj.HealthBar.Text.Font = Drawing.Fonts.Plex
-    obj.HealthBar.Text.Outline = true
-    obj.HealthBar.Text.Visible = false
-    
     for _, line in pairs(obj.Skeleton) do
         line.Thickness = 1.5
         line.Visible = false
@@ -528,11 +586,6 @@ local function HideESP(obj)
     if obj.Distance then obj.Distance.Visible = false end
     if obj.Tracer then obj.Tracer.Visible = false end
     if obj.Fill then obj.Fill.Visible = false end
-    if obj.HealthBar then
-        if obj.HealthBar.Outline then obj.HealthBar.Outline.Visible = false end
-        if obj.HealthBar.Fill then obj.HealthBar.Fill.Visible = false end
-        if obj.HealthBar.Text then obj.HealthBar.Text.Visible = false end
-    end
     if obj.Skeleton then
         for _, line in pairs(obj.Skeleton) do
             if line then line.Visible = false end
@@ -558,11 +611,6 @@ local function DestroyESP(obj)
         if obj.Distance then obj.Distance:Remove() end
         if obj.Tracer then obj.Tracer:Remove() end
         if obj.Fill then obj.Fill:Remove() end
-        if obj.HealthBar then
-            if obj.HealthBar.Outline then obj.HealthBar.Outline:Remove() end
-            if obj.HealthBar.Fill then obj.HealthBar.Fill:Remove() end
-            if obj.HealthBar.Text then obj.HealthBar.Text:Remove() end
-        end
         if obj.Skeleton then
             for _, line in pairs(obj.Skeleton) do
                 if line then line:Remove() end
@@ -605,18 +653,35 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         return
     end
     
-    local screenPos, onScreen = cam:WorldToViewportPoint(rootPos)
+    local camCFrame = cam.CFrame
+    local camPosition = camCFrame.Position
+    local camLookVector = camCFrame.LookVector
     
-    if not onScreen or screenPos.Z <= 0 then
+    local relativePos = rootPos - camPosition
+    local dotProduct = camLookVector:Dot(relativePos.Unit)
+    
+    if dotProduct <= 0 then
         HideESP(obj)
         return
     end
     
-    local baseHeight = 1200 / math.max(screenPos.Z, 1)
+    local viewportSize = cam.ViewportSize
+    local fov = math.rad(cam.FieldOfView)
+    local distance = relativePos.Magnitude
+    
+    local screenX = (viewportSize.X / 2) + (relativePos.X / relativePos.Z) * (viewportSize.X / (2 * math.tan(fov / 2)))
+    local screenY = (viewportSize.Y / 2) - (relativePos.Y / relativePos.Z) * (viewportSize.Y / (2 * math.tan(fov / 2)))
+    
+    if screenX < -100 or screenX > viewportSize.X + 100 or screenY < -100 or screenY > viewportSize.Y + 100 then
+        HideESP(obj)
+        return
+    end
+    
+    local baseHeight = 1200 / math.max(distance, 1)
     local boxH = math.clamp(baseHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
     local boxW = boxH * Tuning.BoxRatio
     
-    local cx, cy = screenPos.X, screenPos.Y
+    local cx, cy = screenX, screenY
     
     local status, color = GetPlayerStatus(model)
     
@@ -708,30 +773,44 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
             
             local size = Vector3.new(modelWidth, modelHeight, modelDepth)
             
-            local front = {
-                TL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, -size.Z/2)).Position),
-                TR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, -size.Z/2)).Position),
-                BL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2)).Position),
-                BR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, -size.Z/2)).Position)
-            }
+            local function worldToScreen(worldPos)
+                local relativePos = worldPos - camPosition
+                local dotProduct = camLookVector:Dot(relativePos.Unit)
+                if dotProduct <= 0 then return nil end
+                local distance = relativePos.Magnitude
+                local fov = math.rad(cam.FieldOfView)
+                local screenX = (viewportSize.X / 2) + (relativePos.X / relativePos.Z) * (viewportSize.X / (2 * math.tan(fov / 2)))
+                local screenY = (viewportSize.Y / 2) - (relativePos.Y / relativePos.Z) * (viewportSize.Y / (2 * math.tan(fov / 2)))
+                return Vector2.new(screenX, screenY), distance
+            end
             
-            local back = {
-                TL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, size.Z/2)).Position),
-                TR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, size.Z/2)).Position),
-                BL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, size.Z/2)).Position),
-                BR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, size.Z/2)).Position)
-            }
+            local frontTL, frontTLZ = worldToScreen((rootCF * CFrame.new(-size.X/2, size.Y/2, -size.Z/2)).Position)
+            local frontTR, frontTRZ = worldToScreen((rootCF * CFrame.new(size.X/2, size.Y/2, -size.Z/2)).Position)
+            local frontBL, frontBLZ = worldToScreen((rootCF * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2)).Position)
+            local frontBR, frontBRZ = worldToScreen((rootCF * CFrame.new(size.X/2, -size.Y/2, -size.Z/2)).Position)
             
-            if not (front.TL.Z > 0 and front.TR.Z > 0 and front.BL.Z > 0 and front.BR.Z > 0 and
-                   back.TL.Z > 0 and back.TR.Z > 0 and back.BL.Z > 0 and back.BR.Z > 0) then
+            local backTL, backTLZ = worldToScreen((rootCF * CFrame.new(-size.X/2, size.Y/2, size.Z/2)).Position)
+            local backTR, backTRZ = worldToScreen((rootCF * CFrame.new(size.X/2, size.Y/2, size.Z/2)).Position)
+            local backBL, backBLZ = worldToScreen((rootCF * CFrame.new(-size.X/2, -size.Y/2, size.Z/2)).Position)
+            local backBR, backBRZ = worldToScreen((rootCF * CFrame.new(size.X/2, -size.Y/2, size.Z/2)).Position)
+            
+            if not (frontTL and frontTR and frontBL and frontBR and backTL and backTR and backBL and backBR) then
                 return
             end
             
-            local function toVector2(v3) return Vector2.new(v3.X, v3.Y) end
-            front.TL, front.TR = toVector2(front.TL), toVector2(front.TR)
-            front.BL, front.BR = toVector2(front.BL), toVector2(front.BR)
-            back.TL, back.TR = toVector2(back.TL), toVector2(back.TR)
-            back.BL, back.BR = toVector2(back.BL), toVector2(back.BR)
+            local front = {
+                TL = frontTL,
+                TR = frontTR,
+                BL = frontBL,
+                BR = frontBR
+            }
+            
+            local back = {
+                TL = backTL,
+                TR = backTR,
+                BL = backBL,
+                BR = backBR
+            }
             
             obj.Box3D.TopLeft.From = front.TL
             obj.Box3D.TopLeft.To = front.TR
@@ -918,11 +997,11 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         end
         local origin
         if tracerOrigin == 1 then
-            origin = Vector2.new(screenCenter.X, screenSize.Y)
+            origin = Vector2.new(viewportSize.X / 2, viewportSize.Y)
         elseif tracerOrigin == 2 then
-            origin = screenCenter
+            origin = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
         else
-            origin = Vector2.new(screenCenter.X, 0)
+            origin = Vector2.new(viewportSize.X / 2, 0)
         end
         obj.Tracer.From = origin
         obj.Tracer.To = Vector2.new(cx, bottom)
@@ -939,65 +1018,6 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         obj.Tracer.Visible = true
     else
         obj.Tracer.Visible = false
-    end
-    
-    if Window.Flags["ESP/HealthBar"] then
-        local humanoid = GetHumanoid(model)
-        if humanoid and humanoid.Health >= 0 and humanoid.MaxHealth > 0 then
-            local health = math.max(humanoid.Health, 0)
-            local maxHealth = humanoid.MaxHealth
-            
-            if maxHealth > 0 then
-                local healthPercent = math.clamp(health / maxHealth, 0, 1)
-                
-                local barHeight = math.max(actualBoxH * 0.8, 20)
-                local barWidth = 4
-                local barPos = Vector2.new(
-                    actualLeft - barWidth - 2,
-                    actualTop + (actualBoxH - barHeight) / 2
-                )
-                
-                if obj.HealthBar and obj.HealthBar.Outline then
-                    obj.HealthBar.Outline.Size = Vector2.new(barWidth, barHeight)
-                    obj.HealthBar.Outline.Position = barPos
-                    obj.HealthBar.Outline.Color = color
-                    obj.HealthBar.Outline.Visible = true
-                    
-                    local fillHeight = math.max(barHeight * healthPercent, 1)
-                    obj.HealthBar.Fill.Size = Vector2.new(barWidth - 2, fillHeight)
-                    obj.HealthBar.Fill.Position = Vector2.new(barPos.X + 1, barPos.Y + barHeight * (1 - healthPercent))
-                    obj.HealthBar.Fill.Color = Color3.fromRGB(255 - (255 * healthPercent), 255 * healthPercent, 0)
-                    obj.HealthBar.Fill.Visible = true
-                    
-                    if Window.Flags["ESP/HealthText"] then
-                        obj.HealthBar.Text.Text = math.floor(health) .. "/" .. math.floor(maxHealth)
-                        obj.HealthBar.Text.Position = Vector2.new(barPos.X + barWidth + 2, barPos.Y + barHeight / 2)
-                        obj.HealthBar.Text.Color = color
-                        obj.HealthBar.Text.Visible = true
-                    else
-                        obj.HealthBar.Text.Visible = false
-                    end
-                end
-            else
-                if obj.HealthBar then
-                    obj.HealthBar.Outline.Visible = false
-                    obj.HealthBar.Fill.Visible = false
-                    obj.HealthBar.Text.Visible = false
-                end
-            end
-        else
-            if obj.HealthBar then
-                obj.HealthBar.Outline.Visible = false
-                obj.HealthBar.Fill.Visible = false
-                obj.HealthBar.Text.Visible = false
-            end
-        end
-    else
-        if obj.HealthBar then
-            obj.HealthBar.Outline.Visible = false
-            obj.HealthBar.Fill.Visible = false
-            obj.HealthBar.Text.Visible = false
-        end
     end
     
     if Window.Flags["ESP/Skeleton"] then
@@ -1018,72 +1038,74 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
             return skeletonParts
         end
         
-        local function drawBone(from, to, line, cam)
-            if not from or not to then 
-                line.Visible = false
-                return 
-            end
-            
-            local fromPos = from.Position
-            local toPos = to.Position
-            
-            local fromScreen, fromVisible = cam:WorldToViewportPoint(fromPos)
-            local toScreen, toVisible = cam:WorldToViewportPoint(toPos)
-            
-            if not (fromVisible and toVisible) or fromScreen.Z < 0 or toScreen.Z < 0 then
-                line.Visible = false
-                return
-            end
-            
-            local screenBounds = cam.ViewportSize
-            if fromScreen.X < -100 or fromScreen.X > screenBounds.X + 100 or
-               fromScreen.Y < -100 or fromScreen.Y > screenBounds.Y + 100 or
-               toScreen.X < -100 or toScreen.X > screenBounds.X + 100 or
-               toScreen.Y < -100 or toScreen.Y > screenBounds.Y + 100 then
-                line.Visible = false
-                return
-            end
-            
-            line.From = Vector2.new(fromScreen.X, fromScreen.Y)
-            line.To = Vector2.new(toScreen.X, toScreen.Y)
-            
-            local skeletonColor = color
-            if Window.Flags["ESP/SkeletonColor"] then
-                local colorData = Window.Flags["ESP/SkeletonColor"]
-                if type(colorData) == "table" and colorData[6] then
-                    skeletonColor = colorData[6]
-                elseif typeof(colorData) == "Color3" then
-                    skeletonColor = colorData
-                end
-            end
-            
-            line.Color = skeletonColor
-            line.Thickness = Window.Flags["ESP/SkeletonThickness"] or 1.5
-            line.Visible = true
-        end
-        
         local skeletonParts = getBonePositions(model)
         if skeletonParts then
             for _, line in pairs(obj.Skeleton) do
                 line.Visible = false
             end
             
-            drawBone(skeletonParts.head, skeletonParts.torso, obj.Skeleton.Head, cam)
+            local function worldToScreenBone(worldPos)
+                local relativePos = worldPos - camPosition
+                local dotProduct = camLookVector:Dot(relativePos.Unit)
+                if dotProduct <= 0 then return nil, false end
+                local distance = relativePos.Magnitude
+                local fov = math.rad(cam.FieldOfView)
+                local screenX = (viewportSize.X / 2) + (relativePos.X / relativePos.Z) * (viewportSize.X / (2 * math.tan(fov / 2)))
+                local screenY = (viewportSize.Y / 2) - (relativePos.Y / relativePos.Z) * (viewportSize.Y / (2 * math.tan(fov / 2)))
+                if screenX < -100 or screenX > viewportSize.X + 100 or screenY < -100 or screenY > viewportSize.Y + 100 then
+                    return nil, false
+                end
+                return Vector2.new(screenX, screenY), true
+            end
+            
+            local function drawBoneStable(from, to, line)
+                if not from or not to then 
+                    line.Visible = false
+                    return 
+                end
+                
+                local fromScreen, fromVisible = worldToScreenBone(from.Position)
+                local toScreen, toVisible = worldToScreenBone(to.Position)
+                
+                if not (fromVisible and toVisible) then
+                    line.Visible = false
+                    return
+                end
+                
+                line.From = fromScreen
+                line.To = toScreen
+                
+                local skeletonColor = color
+                if Window.Flags["ESP/SkeletonColor"] then
+                    local colorData = Window.Flags["ESP/SkeletonColor"]
+                    if type(colorData) == "table" and colorData[6] then
+                        skeletonColor = colorData[6]
+                    elseif typeof(colorData) == "Color3" then
+                        skeletonColor = colorData
+                    end
+                end
+                
+                line.Color = skeletonColor
+                line.Thickness = Window.Flags["ESP/SkeletonThickness"] or 1.5
+                line.Visible = true
+            end
+            
+            drawBoneStable(skeletonParts.head, skeletonParts.torso, obj.Skeleton.Head)
             
             if skeletonParts.right_arm_vis then
-                drawBone(skeletonParts.torso, skeletonParts.right_arm_vis, obj.Skeleton.RightShoulder, cam)
+                drawBoneStable(skeletonParts.torso, skeletonParts.right_arm_vis, obj.Skeleton.RightShoulder)
             end
             
             if skeletonParts.left_arm_vis then
-                drawBone(skeletonParts.torso, skeletonParts.left_arm_vis, obj.Skeleton.LeftShoulder, cam)
+                drawBoneStable(skeletonParts.torso, skeletonParts.left_arm_vis, obj.Skeleton.LeftShoulder)
             end
             
             if skeletonParts.right_leg_vis then
-                drawBone(skeletonParts.torso, skeletonParts.right_leg_vis, obj.Skeleton.RightHip, cam)
+                drawBoneStable(skeletonParts.torso, skeletonParts.right_leg_vis, obj.Skeleton.RightHip)
             end
             
             if skeletonParts.left_leg_vis then
-                drawBone(skeletonParts.torso, skeletonParts.left_leg_vis, obj.Skeleton.LeftHip, cam)
+                drawBoneStable(skeletonParts.torso, skeletonParts.left_leg_vis, obj.Skeleton.LeftHip)
             end
         else
             for _, line in pairs(obj.Skeleton) do
@@ -1468,7 +1490,39 @@ local function MainLoop()
                 Cache.ConfirmedEnemies[model] = nil
                 Cache.EnemyConfirmations[model] = nil
                 Cache.LastFriendlyUpdate[model] = nil
+                Cache.WallCheckResults[model] = nil
                 RemoveChams(model)
+            end
+        end
+    end
+    
+    local localRoot = GetLocalRoot()
+    if localRoot and Window.Flags["ESP/WallCheck"] then
+        local myPos = localRoot.Position
+        for model in pairs(Cache.Soldiers) do
+            if not IsValidModel(model) then continue end
+            local root = GetRoot(model)
+            if root then
+                Cache.WallCheckResults[model] = CheckWallBetween(myPos, root.Position)
+            end
+        end
+    end
+    
+    Cache.ClosestEnemy = nil
+    if Window.Flags["ESP/ClosestEnemy"] and localRoot then
+        local myPos = localRoot.Position
+        local closestDist = math.huge
+        for model in pairs(Cache.Soldiers) do
+            if not IsValidModel(model) then continue end
+            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
+            if Window.Flags["ESP/TeamCheck"] and IsChecking(model) then continue end
+            local root = GetRoot(model)
+            if root then
+                local dist = (root.Position - myPos).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    Cache.ClosestEnemy = model
+                end
             end
         end
     end
@@ -1482,7 +1536,7 @@ local function MainLoop()
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
-            if Cache.Friendlies[model] == true then
+            if Window.Flags["ESP/TeamCheck"] and Cache.Friendlies[model] == true then
                 continue
             end
             
@@ -1658,8 +1712,8 @@ local function Initialize()
             ESPSettingsSection:Toggle({Name = "Box Fill", Flag = "ESP/BoxFill", Value = false})
             ESPSettingsSection:Toggle({Name = "Name", Flag = "ESP/Name", Value = true})
             ESPSettingsSection:Toggle({Name = "Distance", Flag = "ESP/Distance", Value = true})
-            ESPSettingsSection:Toggle({Name = "Health Bar", Flag = "ESP/HealthBar", Value = false})
-            ESPSettingsSection:Toggle({Name = "Health Text", Flag = "ESP/HealthText", Value = true})
+            ESPSettingsSection:Toggle({Name = "Wall Check", Flag = "ESP/WallCheck", Value = false})
+            ESPSettingsSection:Toggle({Name = "Closest Enemy", Flag = "ESP/ClosestEnemy", Value = false})
             ESPSettingsSection:Toggle({Name = "Skeleton", Flag = "ESP/Skeleton", Value = false})
             ESPSettingsSection:Slider({Name = "Skeleton Thickness", Flag = "ESP/SkeletonThickness", Min = 1, Max = 5, Value = 1.5, Precise = 1})
             ESPSettingsSection:Slider({Name = "Max Distance", Flag = "ESP/MaxDistance", Min = 500, Max = 3000, Value = 500, Step = 50})
@@ -1736,7 +1790,111 @@ local function Initialize()
                 end
             end})
         end
+        
+        local ConfigSection = OptionsTab:Section({Name = "Config", Side = "Right"}) do
+            local FolderName = "Varus/Deadline"
+            if not isfolder("Varus") then makefolder("Varus") end
+            if not isfolder(FolderName) then makefolder(FolderName) end
+            if not isfolder(FolderName .. "\\Configs") then makefolder(FolderName .. "\\Configs") end
+            
+            local function UpdateConfigList()
+                local configs = {}
+                for _, configFile in pairs(listfiles(FolderName .. "\\Configs") or {}) do
+                    local configName = configFile:gsub(FolderName .. "\\Configs\\", ""):gsub(".json", "")
+                    configs[#configs + 1] = {
+                        Name = configName,
+                        Mode = "Button"
+                    }
+                end
+                return configs
+            end
+            
+            local ConfigDropdown = ConfigSection:Dropdown({Name = "Config", Flag = "Config/Selected", List = UpdateConfigList()})
+            
+            ConfigSection:Button({Name = "Save", Callback = function()
+                local selected = Window.Flags["Config/Selected"]
+                if selected and selected[1] then
+                    Window:SaveConfig(FolderName, selected[1])
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "Select Config First",
+                        Duration = 3
+                    })
+                end
+            end})
+            
+            ConfigSection:Button({Name = "Load", Callback = function()
+                local selected = Window.Flags["Config/Selected"]
+                if selected and selected[1] then
+                    Window:LoadConfig(FolderName, selected[1])
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "Select Config First",
+                        Duration = 3
+                    })
+                end
+            end})
+            
+            ConfigSection:Button({Name = "Delete", Callback = function()
+                local selected = Window.Flags["Config/Selected"]
+                if selected and selected[1] then
+                    Window:DeleteConfig(FolderName, selected[1])
+                    ConfigDropdown:SetList(UpdateConfigList())
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "Select Config First",
+                        Duration = 3
+                    })
+                end
+            end})
+            
+            ConfigSection:Button({Name = "Refresh", Callback = function()
+                ConfigDropdown:SetList(UpdateConfigList())
+            end})
+            
+            local AutoLoadDivider = ConfigSection:Divider({Text = "AutoLoad Config"})
+            ConfigSection:Button({Name = "Set AutoLoad Config", Callback = function()
+                local selected = Window.Flags["Config/Selected"]
+                if selected and selected[1] then
+                    Window:AddToAutoLoad("Varus/Deadline", selected[1])
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "AutoLoad set to: " .. selected[1],
+                        Duration = 3
+                    })
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "Select Config First",
+                        Duration = 3
+                    })
+                end
+            end})
+        end
     end
+    
+    local autoLoadConfig = Window:GetAutoLoadConfig("Varus/Deadline")
+    if autoLoadConfig then
+        Window:LoadConfig("Varus/Deadline", autoLoadConfig)
+    end
+    
+    local lastSaveTime = 0
+    local saveInterval = 5
+    Connections.AutoSave = RunService.Heartbeat:Connect(function()
+        local now = tick()
+        if now - lastSaveTime > saveInterval then
+            lastSaveTime = now
+            local autoLoadConfig = Window:GetAutoLoadConfig("Varus/Deadline")
+            if autoLoadConfig then
+                pcall(function()
+                    Window:SaveConfig("Varus/Deadline", autoLoadConfig)
+                end)
+            end
+        end
+    end)
     
     InitializeFPSOptimizer()
     
@@ -1751,6 +1909,22 @@ local function Initialize()
         Cache.ConfirmedEnemies = {}
         Cache.EnemyConfirmations = {}
         Cache.LastFriendlyUpdate = {}
+        Cache.WallCheckResults = {}
+        Cache.ClosestEnemy = nil
+        ResetPool()
+    end)
+    
+    Connections.CharacterRemoving = LocalPlayer.CharacterRemoving:Connect(function()
+        ClearAllChams()
+        Cache.Soldiers = {}
+        Cache.Friendlies = {}
+        Cache.FriendlyScores = {}
+        Cache.ConfirmedEnemies = {}
+        Cache.EnemyConfirmations = {}
+        Cache.LastFriendlyUpdate = {}
+        Cache.WallCheckResults = {}
+        Cache.ClosestEnemy = nil
+        ResetPool()
     end)
 end
 
