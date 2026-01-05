@@ -558,19 +558,14 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
     end
     
     local rootPos = root.Position
-    local dist = (rootPos - myPos).Magnitude
     
-    local maxDist = Window.Flags["ESP/MaxDistance"] or 500
-    if dist > maxDist then
+    local head = GetHead(model)
+    if not head or not root then
         HideESP(obj)
         return
     end
     
-    local head = GetHead(model)
-    local torso = GetTorso(model)
-    
-    local headPos = head and head.Position or (rootPos + Vector3.new(0, 2, 0))
-    local torsoPos = torso and torso.Position or (rootPos + Vector3.new(0, 1, 0))
+    local headPos = head.Position
     
     local headScreen, headOnScreen = cam:WorldToViewportPoint(headPos)
     local rootScreen, rootOnScreen = cam:WorldToViewportPoint(rootPos)
@@ -583,15 +578,18 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
     local headScreen2D = Vector2.new(headScreen.X, headScreen.Y)
     local rootScreen2D = Vector2.new(rootScreen.X, rootScreen.Y)
     
-    local screenHeight = math.abs(headScreen2D.Y - rootScreen2D.Y) * 2.2
-    local screenWidth = screenHeight * Tuning.BoxRatio
+    local modelHeight3D = (headPos - rootPos).Magnitude * 2.2
+    local distance3D = (rootPos - cam.CFrame.Position).Magnitude
+    
+    local fov = cam.FieldOfView
+    local viewportHeight = cam.ViewportSize.Y
+    local screenHeight = (modelHeight3D / distance3D) * viewportHeight / (2 * math.tan(math.rad(fov / 2)))
     
     local boxH = math.clamp(screenHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
     local boxW = boxH * Tuning.BoxRatio
     
-    local centerY = (headScreen2D.Y + rootScreen2D.Y) / 2
+    local cy = rootScreen2D.Y - (boxH * 0.55)
     local cx = rootScreen2D.X
-    local cy = centerY
     
     local status, color = GetPlayerStatus(model)
     
@@ -853,7 +851,8 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
     end
     
     if Window.Flags["ESP/Distance"] then
-        obj.Distance.Text = math.floor(dist) .. "m"
+        local distance3D = (rootPos - cam.CFrame.Position).Magnitude
+        obj.Distance.Text = math.floor(distance3D) .. "m"
         obj.Distance.Position = Vector2.new(cx, bottom + Tuning.DistOffset)
         obj.Distance.Visible = true
     else
@@ -1051,10 +1050,11 @@ local function CacheSoldiers()
     local Window = getgenv().Window
     if not Window then return end
     
+    local myRoot = GetLocalRoot()
+    if not myRoot then return end
+    
     local children = CharacterFolder:GetChildren()
     local validModels = {}
-    local myPos = GetLocalPosition()
-    local maxDist = Window.Flags["ESP/MaxDistance"] or 500
     
     for i = 1, #children do
         local model = children[i]
@@ -1064,12 +1064,9 @@ local function CacheSoldiers()
         
         local root = GetRoot(model)
         if root then
-            local dist = (root.Position - myPos).Magnitude
-            if dist <= maxDist then
-                validModels[model] = true
-                if not Cache.Soldiers[model] then
-                    Cache.Soldiers[model] = { added = tick() }
-                end
+            validModels[model] = true
+            if not Cache.Soldiers[model] then
+                Cache.Soldiers[model] = { added = tick() }
             end
         end
     end
@@ -1372,7 +1369,6 @@ local function MainLoop()
     
     if Window.Flags["ESP/Enabled"] then
         local myPos = GetLocalPosition()
-        local maxDistSq = (Window.Flags["ESP/MaxDistance"] or 500) * (Window.Flags["ESP/MaxDistance"] or 500)
         
         Cache.ClosestEnemy = nil
         local closestDist = math.huge
@@ -1389,11 +1385,9 @@ local function MainLoop()
             
             local rootPos = root.Position
             local distVec = rootPos - myPos
-            local distSq = distVec.X * distVec.X + distVec.Y * distVec.Y + distVec.Z * distVec.Z
-            if distSq > maxDistSq then continue end
+            local dist = distVec.Magnitude
             
             if Window.Flags["ESP/ClosestEnemy"] then
-                local dist = math.sqrt(distSq)
                 if dist < closestDist then
                     closestDist = dist
                     Cache.ClosestEnemy = model
@@ -1746,6 +1740,7 @@ local function Initialize()
     Connections.Input = UserInputService.InputBegan:Connect(HandleInput)
     
     Connections.CharacterAdded = LocalPlayer.CharacterAdded:Connect(function()
+        task.wait(1)
         ClearAllChams()
         Cache.Soldiers = {}
         Cache.Friendlies = {}
@@ -1753,6 +1748,22 @@ local function Initialize()
         Cache.ConfirmedEnemies = {}
         Cache.EnemyConfirmations = {}
         Cache.LastFriendlyUpdate = {}
+        Cache.WallChecks = {}
+        Cache.ClosestEnemy = nil
+        State.LastTeamScan = 0
+        State.LastCache = 0
+    end)
+    
+    Connections.CharacterRemoving = LocalPlayer.CharacterRemoving:Connect(function()
+        ClearAllChams()
+        Cache.Soldiers = {}
+        Cache.Friendlies = {}
+        Cache.FriendlyScores = {}
+        Cache.ConfirmedEnemies = {}
+        Cache.EnemyConfirmations = {}
+        Cache.LastFriendlyUpdate = {}
+        Cache.WallChecks = {}
+        Cache.ClosestEnemy = nil
     end)
 end
 
