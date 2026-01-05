@@ -419,65 +419,22 @@ local function GetPlayerStatus(model)
         end
     end
     
+    local isClosest = Window.Flags["ESP/ClosestEnemy"] and Cache.ClosestEnemy == model
+    local isInOpen = Window.Flags["ESP/WallCheck"] and Cache.WallCheckResults[model] == true
+    
+    if isInOpen and isClosest then
+        return "enemy", Color3.fromRGB(0, 255, 0)
+    elseif isInOpen then
+        return "enemy", Color3.fromRGB(0, 255, 0)
+    elseif isClosest then
+        return "enemy", Color3.fromRGB(255, 0, 255)
+    end
+    
     if not Window.Flags["ESP/TeamCheck"] then
-        if Window.Flags["ESP/WallCheck"] then
-            local root = GetRoot(model)
-            if root then
-                local localRoot = GetLocalRoot()
-                if localRoot then
-                    local isInOpen = Cache.WallCheckResults[model]
-                    if isInOpen then
-                        return "neutral", Color3.fromRGB(0, 255, 0)
-                    end
-                end
-            end
-        end
-        
-        if Window.Flags["ESP/ClosestEnemy"] and Cache.ClosestEnemy == model then
-            local root = GetRoot(model)
-            if root then
-                local localRoot = GetLocalRoot()
-                if localRoot and Window.Flags["ESP/WallCheck"] then
-                    local isInOpen = Cache.WallCheckResults[model]
-                    if isInOpen then
-                        return "neutral", Color3.fromRGB(0, 255, 0)
-                    end
-                end
-                return "neutral", Color3.fromRGB(255, 0, 255)
-            end
-        end
-        
         return "neutral", enemyColor
     end
     
     if Cache.ConfirmedEnemies[model] then
-        if Window.Flags["ESP/WallCheck"] then
-            local root = GetRoot(model)
-            if root then
-                local localRoot = GetLocalRoot()
-                if localRoot then
-                    local isInOpen = Cache.WallCheckResults[model]
-                    if isInOpen then
-                        return "enemy", Color3.fromRGB(0, 255, 0)
-                    end
-                end
-            end
-        end
-        
-        if Window.Flags["ESP/ClosestEnemy"] and Cache.ClosestEnemy == model then
-            local root = GetRoot(model)
-            if root then
-                local localRoot = GetLocalRoot()
-                if localRoot and Window.Flags["ESP/WallCheck"] then
-                    local isInOpen = Cache.WallCheckResults[model]
-                    if isInOpen then
-                        return "enemy", Color3.fromRGB(0, 255, 0)
-                    end
-                end
-                return "enemy", Color3.fromRGB(255, 0, 255)
-            end
-        end
-        
         return "enemy", enemyColor
     end
     
@@ -653,15 +610,32 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         return
     end
     
-    local screenPos, onScreen = cam:WorldToViewportPoint(rootPos)
+    local head = GetHead(model)
+    local characterCenter = rootPos
+    if head then
+        characterCenter = (rootPos + head.Position) / 2
+    end
+    
+    local screenPos, onScreen = cam:WorldToViewportPoint(characterCenter)
     
     if not onScreen or screenPos.Z <= 0 then
         HideESP(obj)
         return
     end
     
+    local headScreen = nil
+    if head then
+        headScreen = cam:WorldToViewportPoint(head.Position)
+    end
+    
     local baseHeight = 1200 / math.max(screenPos.Z, 1)
     local boxH = math.clamp(baseHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
+    
+    if headScreen and headScreen.Z > 0 then
+        local headHeight = math.abs(headScreen.Y - screenPos.Y) * 2.2
+        boxH = math.max(boxH, headHeight)
+    end
+    
     local boxW = boxH * Tuning.BoxRatio
     
     local cx, cy = screenPos.X, screenPos.Y
@@ -886,17 +860,7 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
                 line.From = Vector2.new(fromScreen.X, fromScreen.Y)
                 line.To = Vector2.new(toScreen.X, toScreen.Y)
                 
-                local skeletonColor = color
-                if Window.Flags["ESP/SkeletonColor"] then
-                    local colorData = Window.Flags["ESP/SkeletonColor"]
-                    if type(colorData) == "table" and colorData[6] then
-                        skeletonColor = colorData[6]
-                    elseif typeof(colorData) == "Color3" then
-                        skeletonColor = colorData
-                    end
-                end
-                
-                line.Color = skeletonColor
+                line.Color = color
                 line.Thickness = Window.Flags["ESP/SkeletonThickness"] or 1.5
                 line.Visible = true
             end
@@ -955,16 +919,6 @@ local function UpdateChams(model)
     if not Window then return end
     
     local status, fillColor = GetPlayerStatus(model)
-    if not Window.Flags["ESP/TeamCheck"] then
-        fillColor = Palette.ChamsFill
-    elseif status == "friendly" then
-        fillColor = Palette.Friendly
-    elseif status == "checking" then
-        fillColor = Palette.Checking
-    else
-        fillColor = Palette.ChamsFill
-    end
-    
     h.FillColor = fillColor
     h.OutlineTransparency = Window.Flags["ESP/ChamsOutline"] and 0 or 1
 end
@@ -1131,12 +1085,19 @@ local function ProcessAimbot(cam, screenCenter)
         return 
     end
     
+    if not cam or not LocalPlayer.Character or not GetLocalRoot() then
+        PredictionDot.Visible = false
+        return
+    end
+    
     local mousePos = UserInputService:GetMouseLocation()
     local isHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     
     local cameraFOV = Window.Flags["AIM/CameraFOV"] or 70
-    if cam.FieldOfView ~= cameraFOV then
-        cam.FieldOfView = cameraFOV
+    if cam and cam.FieldOfView ~= cameraFOV then
+        pcall(function()
+            cam.FieldOfView = cameraFOV
+        end)
     end
     
     FOVCircle.Position = mousePos
@@ -1312,6 +1273,7 @@ local function MainLoop()
         local myPos = localRoot.Position
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
+            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
             local root = GetRoot(model)
             if root then
                 Cache.WallCheckResults[model] = CheckWallBetween(myPos, root.Position)
