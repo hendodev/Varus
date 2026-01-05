@@ -12,7 +12,7 @@ end
 
 local Tuning = {
     CacheInterval = 0.2,
-    TeamScanInterval = 0.5,
+    TeamScanInterval = 5.0,
     CleanupInterval = 1.0,
     ChamsUpdateInterval = 0.15,
     
@@ -253,14 +253,10 @@ local function UpdateFriendlyStatus()
     local cam = Workspace.CurrentCamera
     if not cam then return end
     
-    local processedModels = {}
-    
     for model, data in pairs(Cache.Soldiers) do
         if not IsValidModel(model) then
             Cache.Friendlies[model] = nil
-            Cache.FriendlyScores[model] = nil
             Cache.ConfirmedEnemies[model] = nil
-            Cache.EnemyConfirmations[model] = nil
             continue
         end
         
@@ -269,24 +265,9 @@ local function UpdateFriendlyStatus()
         
         local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
         
-        if Cache.ConfirmedEnemies[model] then
-            continue
-        end
-        
         if not onScreen or screenPos.Z <= 0 then
-            local enemyConfirms = Cache.EnemyConfirmations[model] or 0
-            if enemyConfirms > 0 then
-                Cache.EnemyConfirmations[model] = enemyConfirms + 1
-                if Cache.EnemyConfirmations[model] >= 4 then
-                    Cache.ConfirmedEnemies[model] = true
-                    Cache.Friendlies[model] = nil
-                    Cache.EnemyConfirmations[model] = 999
-                end
-            end
             continue
         end
-        
-        processedModels[model] = true
         
         local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
         local foundIndicator = false
@@ -300,47 +281,12 @@ local function UpdateFriendlyStatus()
             end
         end
         
-        local currentScore = Cache.FriendlyScores[model] or 0
-        local enemyConfirms = Cache.EnemyConfirmations[model] or 0
-        
         if foundIndicator then
-            currentScore = math.min(currentScore + 2, 8)
-            enemyConfirms = math.max(enemyConfirms - 2, 0)
-        else
-            currentScore = math.max(currentScore - 1, 0)
-            enemyConfirms = enemyConfirms + 2
-        end
-        
-        Cache.FriendlyScores[model] = currentScore
-        Cache.EnemyConfirmations[model] = enemyConfirms
-        Cache.LastFriendlyUpdate[model] = tick()
-        
-        if currentScore >= 3 then
             Cache.Friendlies[model] = true
             Cache.ConfirmedEnemies[model] = nil
-            Cache.EnemyConfirmations[model] = 0
-        elseif enemyConfirms >= 4 then
+        else
             Cache.Friendlies[model] = nil
             Cache.ConfirmedEnemies[model] = true
-            Cache.EnemyConfirmations[model] = 999
-        elseif currentScore <= 0 then
-            Cache.Friendlies[model] = nil
-        end
-    end
-    
-    for model in pairs(Cache.FriendlyScores) do
-        if not processedModels[model] and Cache.Soldiers[model] then
-            if not Cache.ConfirmedEnemies[model] then
-                local lastUpdate = Cache.LastFriendlyUpdate[model] or 0
-                if tick() - lastUpdate > 2 then
-                    Cache.FriendlyScores[model] = math.max((Cache.FriendlyScores[model] or 0) - 1, 0)
-                    Cache.LastFriendlyUpdate[model] = tick()
-                    
-                    if Cache.FriendlyScores[model] <= 0 then
-                        Cache.Friendlies[model] = nil
-                    end
-                end
-            end
         end
     end
 end
@@ -389,7 +335,6 @@ local function GetPlayerStatus(model)
     
     local enemyColor = Palette.Enemy
     local friendlyColor = Palette.Friendly
-    local checkingColor = Palette.Checking
     
     if Window.Flags["ESP/EnemyColor"] then
         local colorData = Window.Flags["ESP/EnemyColor"]
@@ -406,15 +351,6 @@ local function GetPlayerStatus(model)
             friendlyColor = colorData[6]
         elseif typeof(colorData) == "Color3" then
             friendlyColor = colorData
-        end
-    end
-    
-    if Window.Flags["ESP/CheckingColor"] then
-        local colorData = Window.Flags["ESP/CheckingColor"]
-        if type(colorData) == "table" and colorData[6] then
-            checkingColor = colorData[6]
-        elseif typeof(colorData) == "Color3" then
-            checkingColor = colorData
         end
     end
     
@@ -440,33 +376,29 @@ local function GetPlayerStatus(model)
         return "neutral", enemyColor
     end
     
-    if Cache.ConfirmedEnemies[model] then
-        local isInOpen = false
-        if Window.Flags["ESP/WallCheck"] then
-            isInOpen = CheckWall(model)
-        end
-        
-        local isClosest = (Cache.ClosestEnemy == model)
-        if Window.Flags["ESP/ClosestEnemy"] and isClosest then
-            if isInOpen then
-                return "enemy", Color3.fromRGB(0, 255, 0)
-            else
-                return "enemy", Color3.fromRGB(200, 0, 255)
-            end
-        end
-        
-        if isInOpen then
-            return "enemy", Color3.fromRGB(0, 255, 0)
-        end
-        
-        return "enemy", enemyColor
-    end
-    
     if Cache.Friendlies[model] == true then
         return "friendly", friendlyColor
     end
     
-    return "checking", checkingColor
+    local isInOpen = false
+    if Window.Flags["ESP/WallCheck"] then
+        isInOpen = CheckWall(model)
+    end
+    
+    local isClosest = (Cache.ClosestEnemy == model)
+    if Window.Flags["ESP/ClosestEnemy"] and isClosest then
+        if isInOpen then
+            return "enemy", Color3.fromRGB(0, 255, 0)
+        else
+            return "enemy", Color3.fromRGB(200, 0, 255)
+        end
+    end
+    
+    if isInOpen then
+        return "enemy", Color3.fromRGB(0, 255, 0)
+    end
+    
+    return "enemy", enemyColor
 end
 
 local function CreateESPObject()
@@ -634,42 +566,37 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         return
     end
     
-    local screenPos, onScreen = cam:WorldToViewportPoint(rootPos)
+    local head = GetHead(model)
+    local torso = GetTorso(model)
     
-    if not onScreen or screenPos.Z <= 0 then
+    local headPos = head and head.Position or (rootPos + Vector3.new(0, 2, 0))
+    local torsoPos = torso and torso.Position or (rootPos + Vector3.new(0, 1, 0))
+    
+    local headScreen, headOnScreen = cam:WorldToViewportPoint(headPos)
+    local rootScreen, rootOnScreen = cam:WorldToViewportPoint(rootPos)
+    
+    if not headOnScreen or not rootOnScreen or headScreen.Z <= 0 or rootScreen.Z <= 0 then
         HideESP(obj)
         return
     end
     
-    local baseHeight = 1200 / math.max(screenPos.Z, 1)
-    local boxH = math.clamp(baseHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
+    local headScreen2D = Vector2.new(headScreen.X, headScreen.Y)
+    local rootScreen2D = Vector2.new(rootScreen.X, rootScreen.Y)
+    
+    local screenHeight = math.abs(headScreen2D.Y - rootScreen2D.Y) * 2.2
+    local screenWidth = screenHeight * Tuning.BoxRatio
+    
+    local boxH = math.clamp(screenHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
     local boxW = boxH * Tuning.BoxRatio
     
-    local cx, cy = screenPos.X, screenPos.Y
+    local centerY = (headScreen2D.Y + rootScreen2D.Y) / 2
+    local cx = rootScreen2D.X
+    local cy = centerY
     
     local status, color = GetPlayerStatus(model)
     
-    local head = GetHead(model)
-    local torso = GetTorso(model)
-    local modelHeight = 5
-    local modelWidth = 2.5
-    
-    if head and root then
-        local headToRoot = (head.Position - root.Position).Magnitude
-        modelHeight = headToRoot * 2.2
-    end
-    if torso and root then
-        local torsoToRoot = (torso.Position - root.Position).Magnitude
-        modelWidth = math.max(torsoToRoot * 1.5, 2.5)
-    end
-    
-    local modelSizeScreen = cam:WorldToViewportPoint(root.Position + Vector3.new(modelWidth, modelHeight, 0))
-    local rootScreen = cam:WorldToViewportPoint(root.Position)
-    local screenModelHeight = math.abs(modelSizeScreen.Y - rootScreen.Y) * 2
-    local screenModelWidth = math.abs(modelSizeScreen.X - rootScreen.X) * 2
-    
-    local actualBoxH = math.max(screenModelHeight, boxH)
-    local actualBoxW = math.max(screenModelWidth, boxW)
+    local actualBoxH = boxH
+    local actualBoxW = boxW
     
     local actualHalfW, actualHalfH = actualBoxW / 2, actualBoxH / 2
     local actualTop = cy - actualHalfH * 1.1
@@ -912,8 +839,6 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         if Window.Flags["ESP/TeamCheck"] then
             if status == "friendly" then
                 obj.Name.Text = "FRIENDLY"
-            elseif status == "checking" then
-                obj.Name.Text = "CHECKING"
             else
                 obj.Name.Text = "ENEMY"
             end
