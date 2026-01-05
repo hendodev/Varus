@@ -257,14 +257,12 @@ local function UpdateFriendlyStatus()
         if not IsValidModel(model) then
             Cache.Friendlies[model] = nil
             Cache.ConfirmedEnemies[model] = nil
-            Cache.EnemyConfirmations[model] = 0
             continue
         end
         
         local root = GetRoot(model)
         if not root then continue end
         
-        local friendlyScore = Cache.FriendlyScores[model] or 0
         local isFriendlyByTeam = VerifyFriendlyByTeam(model)
         
         if isFriendlyByTeam then
@@ -277,43 +275,38 @@ local function UpdateFriendlyStatus()
         
         local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
         
-        if onScreen and screenPos.Z > 0 then
-            local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
-            local foundIndicator = false
-            
-            for i = 1, #Cache.FriendlyIndicators do
-                local indicator = Cache.FriendlyIndicators[i]
-                local dist = (indicator - screenPos2D).Magnitude
-                if dist < 120 then
-                    foundIndicator = true
-                    break
-                end
-            end
-            
-            if foundIndicator then
-                Cache.Friendlies[model] = true
-                Cache.ConfirmedEnemies[model] = nil
-                Cache.EnemyConfirmations[model] = 0
-                Cache.FriendlyScores[model] = 10
-                continue
+        if not onScreen or screenPos.Z <= 0 then
+            continue
+        end
+        
+        local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
+        local foundIndicator = false
+        
+        for i = 1, #Cache.FriendlyIndicators do
+            local indicator = Cache.FriendlyIndicators[i]
+            local dist = (indicator - screenPos2D).Magnitude
+            if dist < 120 then
+                foundIndicator = true
+                break
             end
         end
         
-        if Cache.Friendlies[model] == true then
-            friendlyScore = math.max(0, friendlyScore - 1)
-            Cache.FriendlyScores[model] = friendlyScore
-            
-            if friendlyScore <= 0 then
-                Cache.EnemyConfirmations[model] = (Cache.EnemyConfirmations[model] or 0) + 1
+        if foundIndicator then
+            Cache.Friendlies[model] = true
+            Cache.ConfirmedEnemies[model] = nil
+            Cache.EnemyConfirmations[model] = 0
+            Cache.FriendlyScores[model] = 10
+        else
+            if Cache.Friendlies[model] == true then
+                local friendlyScore = Cache.FriendlyScores[model] or 10
+                friendlyScore = math.max(0, friendlyScore - 1)
+                Cache.FriendlyScores[model] = friendlyScore
                 
-                if Cache.EnemyConfirmations[model] >= 3 then
+                if friendlyScore <= 0 then
                     Cache.Friendlies[model] = nil
                 end
-            end
-        else
-            Cache.EnemyConfirmations[model] = (Cache.EnemyConfirmations[model] or 0) + 1
-            
-            if Cache.EnemyConfirmations[model] >= 5 then
+            else
+                Cache.Friendlies[model] = nil
                 Cache.ConfirmedEnemies[model] = true
             end
         end
@@ -341,8 +334,7 @@ local function IsFriendly(model)
     end
     
     if Cache.ConfirmedEnemies[model] then return false end
-    
-    return false
+    return Cache.Friendlies[model] == true
 end
 
 local function IsChecking(model)
@@ -1366,7 +1358,7 @@ local function MainLoop()
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
-            if Window.Flags["ESP/TeamCheck"] and Cache.Friendlies[model] == true then
+            if Cache.Friendlies[model] == true then
                 continue
             end
             
