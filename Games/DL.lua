@@ -176,6 +176,89 @@ local function ScanFriendlyIndicators()
     end
 end
 
+local function DetectTeammates()
+    -- Detect teammates when teamcheck is off
+    local Window = getgenv().Window
+    if not Window or Window.Flags["ESP/TeamCheck"] then return end
+    
+    local Teams = game:GetService("Teams")
+    local LocalPlayer = Players.LocalPlayer
+    local myTeam = LocalPlayer.Team
+    
+    if not myTeam then return end
+    
+    -- Get all players on my team
+    local myTeamPlayers = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Team == myTeam and player ~= LocalPlayer then
+            myTeamPlayers[player] = true
+        end
+    end
+    
+    -- Match models to players and mark teammates as friendlies
+    for model in pairs(Cache.Soldiers) do
+        if not IsValidModel(model) then continue end
+        
+        local root = GetRoot(model)
+        if not root then continue end
+        
+        local modelPos = root.Position
+        local isTeammate = false
+        
+        -- Try to match model to a player by position/proximity
+        for player, _ in pairs(myTeamPlayers) do
+            if player.Character then
+                local charRoot = player.Character:FindFirstChild("HumanoidRootPart") or player.Character:FindFirstChild("humanoid_root_part")
+                if charRoot then
+                    local dist = (charRoot.Position - modelPos).Magnitude
+                    if dist < 2 then
+                        -- This model likely belongs to this teammate
+                        isTeammate = true
+                        break
+                    end
+                end
+            end
+        end
+        
+        -- Also check if model has team indicator in its name or properties
+        if not isTeammate then
+            pcall(function()
+                -- Check for team-related properties
+                if model:FindFirstChild("Team") then
+                    local modelTeam = model.Team
+                    if typeof(modelTeam) == "Instance" and modelTeam:IsA("Team") then
+                        isTeammate = (modelTeam == myTeam)
+                    elseif typeof(modelTeam) == "string" then
+                        isTeammate = (modelTeam == myTeam.Name)
+                    end
+                end
+            end)
+        end
+        
+        if isTeammate then
+            Cache.Friendlies[model] = true
+            Cache.ConfirmedEnemies[model] = nil
+            Cache.EnemyConfirmations[model] = 0
+            Cache.FriendlyScores[model] = 8 -- High score to keep as friendly
+        else
+            -- Not a teammate, but don't mark as enemy when teamcheck is off
+            -- Just clear friendly status
+            if Cache.Friendlies[model] then
+                Cache.Friendlies[model] = nil
+            end
+        end
+    end
+end
+
+local function ClearTeamCache()
+    -- Clear all team-related cache
+    Cache.Friendlies = {}
+    Cache.FriendlyScores = {}
+    Cache.ConfirmedEnemies = {}
+    Cache.EnemyConfirmations = {}
+    Cache.LastFriendlyUpdate = {}
+end
+
 local function UpdateFriendlyStatus()
     local Window = getgenv().Window
     if not Window or not Window.Flags["ESP/TeamCheck"] then
@@ -209,7 +292,8 @@ local function UpdateFriendlyStatus()
             local enemyConfirms = Cache.EnemyConfirmations[model] or 0
             if enemyConfirms > 0 then
                 Cache.EnemyConfirmations[model] = enemyConfirms + 1
-                if Cache.EnemyConfirmations[model] >= 2 then
+                if Cache.EnemyConfirmations[model] >= 4 then
+                    -- Require more confirmations before marking as enemy
                     Cache.ConfirmedEnemies[model] = true
                     Cache.Friendlies[model] = nil
                     Cache.EnemyConfirmations[model] = 999
@@ -251,7 +335,8 @@ local function UpdateFriendlyStatus()
             Cache.Friendlies[model] = true
             Cache.ConfirmedEnemies[model] = nil
             Cache.EnemyConfirmations[model] = 0
-        elseif enemyConfirms >= 2 then
+        elseif enemyConfirms >= 4 then
+            -- Require more confirmations before marking as enemy to prevent false positives
             Cache.Friendlies[model] = nil
             Cache.ConfirmedEnemies[model] = true
             Cache.EnemyConfirmations[model] = 999
@@ -279,7 +364,13 @@ end
 
 local function IsFriendly(model)
     local Window = getgenv().Window
-    if not Window or not Window.Flags["ESP/TeamCheck"] then return false end
+    if not Window then return false end
+    
+    -- When teamcheck is off, still check if marked as friendly (teammates)
+    if not Window.Flags["ESP/TeamCheck"] then
+        return Cache.Friendlies[model] == true
+    end
+    
     if Cache.ConfirmedEnemies[model] then return false end
     return Cache.Friendlies[model] == true
 end
@@ -367,6 +458,22 @@ local function CreateESPObject()
             Outline = Drawing.new("Square"),
             Fill = Drawing.new("Square"),
             Text = Drawing.new("Text")
+        },
+        Skeleton = {
+            Head = Drawing.new("Line"),
+            UpperSpine = Drawing.new("Line"),
+            LeftShoulder = Drawing.new("Line"),
+            LeftUpperArm = Drawing.new("Line"),
+            LeftLowerArm = Drawing.new("Line"),
+            RightShoulder = Drawing.new("Line"),
+            RightUpperArm = Drawing.new("Line"),
+            RightLowerArm = Drawing.new("Line"),
+            LeftHip = Drawing.new("Line"),
+            LeftUpperLeg = Drawing.new("Line"),
+            LeftLowerLeg = Drawing.new("Line"),
+            RightHip = Drawing.new("Line"),
+            RightUpperLeg = Drawing.new("Line"),
+            RightLowerLeg = Drawing.new("Line")
         }
     }
     
@@ -419,6 +526,12 @@ local function CreateESPObject()
     obj.HealthBar.Text.Outline = true
     obj.HealthBar.Text.Visible = false
     
+    -- Setup skeleton lines
+    for _, line in pairs(obj.Skeleton) do
+        line.Thickness = 1.5
+        line.Visible = false
+    end
+    
     return obj
 end
 
@@ -444,6 +557,11 @@ local function HideESP(obj)
         if obj.HealthBar.Fill then obj.HealthBar.Fill.Visible = false end
         if obj.HealthBar.Text then obj.HealthBar.Text.Visible = false end
     end
+    if obj.Skeleton then
+        for _, line in pairs(obj.Skeleton) do
+            if line then line.Visible = false end
+        end
+    end
 end
 
 local function DestroyESP(obj)
@@ -468,6 +586,11 @@ local function DestroyESP(obj)
             if obj.HealthBar.Outline then obj.HealthBar.Outline:Remove() end
             if obj.HealthBar.Fill then obj.HealthBar.Fill:Remove() end
             if obj.HealthBar.Text then obj.HealthBar.Text:Remove() end
+        end
+        if obj.Skeleton then
+            for _, line in pairs(obj.Skeleton) do
+                if line then line:Remove() end
+            end
         end
     end)
 end
@@ -543,9 +666,22 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         end
         
         if boxStyle == "ThreeD" then
-            -- 3D Box ESP
+            -- 3D Box ESP - Use actual model size
             local rootCF = root.CFrame
-            local size = Vector3.new(boxW, boxH, boxW * 0.5)
+            local head = GetHead(model)
+            local torso = GetTorso(model)
+            
+            -- Calculate actual model size in studs
+            local modelHeight = 5 -- Default height
+            if head and root then
+                local headToRoot = (head.Position - root.Position).Magnitude
+                modelHeight = headToRoot * 2.2 -- Approximate full height
+            end
+            
+            -- Use reasonable proportions for humanoid
+            local modelWidth = 2.5 -- Typical humanoid width
+            local modelDepth = 1.5 -- Typical humanoid depth
+            local size = Vector3.new(modelWidth, modelHeight, modelDepth)
             
             local front = {
                 TL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, -size.Z/2)).Position),
@@ -969,6 +1105,49 @@ local function GetClosestTarget(cam, mousePos)
     return closestTarget
 end
 
+local function CalculatePrediction(targetPart, cam, weaponType)
+    if not targetPart or not targetPart.Parent then return targetPart.Position end
+    
+    local Window = getgenv().Window
+    if not Window or not Window.Flags["AIM/Prediction"] then
+        return targetPart.Position
+    end
+    
+    -- Get weapon type settings
+    local weaponTypeValue = Window.Flags["AIM/PredictionType"]
+    local weaponTypeStr = "Rifle"
+    if type(weaponTypeValue) == "table" and #weaponTypeValue > 0 then
+        weaponTypeStr = weaponTypeValue[1]
+    end
+    
+    -- Bullet speeds (studs per second)
+    local bulletSpeed = 1000 -- Default rifle speed
+    if weaponTypeStr == "Sniper" then
+        bulletSpeed = 2000
+    elseif weaponTypeStr == "Pistol" then
+        bulletSpeed = 800
+    elseif weaponTypeStr == "Rifle" then
+        bulletSpeed = 1000
+    end
+    
+    -- Get target velocity
+    local root = GetRoot(targetPart.Parent)
+    if not root then return targetPart.Position end
+    
+    local targetVelocity = root.AssemblyLinearVelocity or Vector3.new(0, 0, 0)
+    
+    -- Calculate time to target
+    local myPos = GetLocalPosition()
+    local targetPos = targetPart.Position
+    local distance = (targetPos - myPos).Magnitude
+    local timeToTarget = distance / bulletSpeed
+    
+    -- Predict position
+    local predictedPosition = targetPos + (targetVelocity * timeToTarget)
+    
+    return predictedPosition
+end
+
 local function ProcessAimbot(cam, screenCenter)
     local Window = getgenv().Window
     if not Window then return end
@@ -1007,7 +1186,9 @@ local function ProcessAimbot(cam, screenCenter)
     
     if not targetPart then return end
     
-    local screenPos = cam:WorldToViewportPoint(targetPart.Position)
+    -- Use prediction if enabled
+    local targetPosition = CalculatePrediction(targetPart, cam, Window.Flags["AIM/PredictionType"])
+    local screenPos = cam:WorldToViewportPoint(targetPosition)
     local delta = Vector2.new(screenPos.X, screenPos.Y) - mousePos
     local smooth = Window.Flags["AIM/Smooth"] or 0.18
     
@@ -1068,10 +1249,15 @@ local function MainLoop()
         CacheSoldiers()
     end
     
-    if Window.Flags["ESP/TeamCheck"] and now - State.LastTeamScan > Tuning.TeamScanInterval then
+    if now - State.LastTeamScan > Tuning.TeamScanInterval then
         State.LastTeamScan = now
-        ScanFriendlyIndicators()
-        UpdateFriendlyStatus()
+        if Window.Flags["ESP/TeamCheck"] then
+            ScanFriendlyIndicators()
+            UpdateFriendlyStatus()
+        else
+            -- When teamcheck is off, detect teammates
+            DetectTeammates()
+        end
     end
     
     if now - State.LastCleanup > Tuning.CleanupInterval then
@@ -1098,12 +1284,9 @@ local function MainLoop()
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
-            -- Fix teamcheck: Only skip if confirmed friendly, not checking
-            if Window.Flags["ESP/TeamCheck"] then
-                if Cache.Friendlies[model] == true then
-                    continue -- Skip confirmed friendlies
-                end
-                -- Show enemies and checking status
+            -- Skip friendlies (both when teamcheck is on or off)
+            if Cache.Friendlies[model] == true then
+                continue -- Skip confirmed friendlies/teammates
             end
             
             local root = GetRoot(model)
@@ -1286,6 +1469,8 @@ local function Initialize()
             ESPSettingsSection:Toggle({Name = "Distance", Flag = "ESP/Distance", Value = true})
             ESPSettingsSection:Toggle({Name = "Health Bar", Flag = "ESP/HealthBar", Value = false})
             ESPSettingsSection:Toggle({Name = "Health Text", Flag = "ESP/HealthText", Value = true})
+            ESPSettingsSection:Toggle({Name = "Skeleton", Flag = "ESP/Skeleton", Value = false})
+            ESPSettingsSection:Slider({Name = "Skeleton Thickness", Flag = "ESP/SkeletonThickness", Min = 1, Max = 5, Value = 1.5, Precise = 1})
             ESPSettingsSection:Slider({Name = "Max Distance", Flag = "ESP/MaxDistance", Min = 500, Max = 3000, Value = 500, Step = 50})
             ESPSettingsSection:Toggle({Name = "Tracer", Flag = "ESP/Tracer", Value = false})
             ESPSettingsSection:Dropdown({Name = "Tracer Origin", Flag = "ESP/TracerOrigin", List = {
@@ -1293,7 +1478,10 @@ local function Initialize()
                 {Name = "Center", Mode = "Button"},
                 {Name = "Top", Mode = "Button"}
             }})
-            ESPSettingsSection:Toggle({Name = "Team Check", Flag = "ESP/TeamCheck", Value = true})
+            ESPSettingsSection:Toggle({Name = "Team Check", Flag = "ESP/TeamCheck", Value = true, Callback = function(Bool)
+                -- Clear team cache when toggled
+                ClearTeamCache()
+            end})
         end
         
         local ColorSection = ESPTab:Section({Name = "Colors", Side = "Left"}) do
@@ -1301,6 +1489,7 @@ local function Initialize()
             ColorSection:Colorpicker({Name = "Friendly Color", Flag = "ESP/FriendlyColor", Value = {0.314, 0.706, 1, 0, false}})
             ColorSection:Colorpicker({Name = "Checking Color", Flag = "ESP/CheckingColor", Value = {0.588, 0.588, 0.588, 0, false}})
             ColorSection:Colorpicker({Name = "Tracer Color", Flag = "ESP/TracerColor", Value = {1, 0.549, 0.392, 0, false}})
+            ColorSection:Colorpicker({Name = "Skeleton Color", Flag = "ESP/SkeletonColor", Value = {1, 1, 1, 0, false}})
         end
         
         local ChamsSection = ESPTab:Section({Name = "Chams", Side = "Right"}) do
@@ -1326,6 +1515,12 @@ local function Initialize()
                 {Name = "Root", Mode = "Button"}
             }})
             AimbotSection:Toggle({Name = "Team Check", Flag = "AIM/TeamCheck", Value = true})
+            AimbotSection:Toggle({Name = "Prediction", Flag = "AIM/Prediction", Value = false})
+            AimbotSection:Dropdown({Name = "Prediction Type", Flag = "AIM/PredictionType", List = {
+                {Name = "Rifle", Mode = "Button", Value = true},
+                {Name = "Sniper", Mode = "Button"},
+                {Name = "Pistol", Mode = "Button"}
+            }})
         end
     end
     
