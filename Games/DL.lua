@@ -947,7 +947,37 @@ local function HandleInput(input, gameProcessed)
     end
 end
 
+local function IsDeadlineGame()
+    -- Verify this is actually Deadline game
+    local charactersFolder = Workspace:FindFirstChild("characters")
+    if not charactersFolder then
+        return false
+    end
+    
+    -- Additional verification: check if models have humanoid_root_part (Deadline-specific)
+    local hasDeadlineStructure = false
+    for _, child in pairs(charactersFolder:GetChildren()) do
+        if child:IsA("Model") and child:FindFirstChild("humanoid_root_part") then
+            hasDeadlineStructure = true
+            break
+        end
+    end
+    
+    return hasDeadlineStructure
+end
+
 local function Initialize()
+    -- Verify we're in the correct game before proceeding
+    if not IsDeadlineGame() then
+        warn("Deadline script loaded but game structure doesn't match. This might not be Deadline.")
+        Parvus.Utilities.UI:Push({
+            Title = "Deadline",
+            Description = "Game detection failed. Make sure you're in Deadline (ID: 12144402492)",
+            Duration = 5
+        })
+        return
+    end
+    
     CharacterFolder = Workspace:WaitForChild("characters", 10)
     
     if not CharacterFolder then
