@@ -58,7 +58,9 @@ local Cache = {
     ConfirmedEnemies = {},
     EnemyConfirmations = {},
     FriendlyIndicators = {},
-    LastFriendlyUpdate = {}
+    LastFriendlyUpdate = {},
+    WallChecks = {},
+    ClosestEnemy = nil
 }
 
 local ESP = {
@@ -363,6 +365,22 @@ local function IsChecking(model)
     return true
 end
 
+local function CheckWall(model)
+    local myRoot = GetLocalRoot()
+    if not myRoot then return false end
+    
+    local targetRoot = GetRoot(model)
+    if not targetRoot then return false end
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, model}
+    
+    local raycastResult = Workspace:Raycast(myRoot.Position, (targetRoot.Position - myRoot.Position), raycastParams)
+    
+    return raycastResult == nil
+end
+
 local function GetPlayerStatus(model)
     local Window = getgenv().Window
     if not Window then
@@ -401,10 +419,46 @@ local function GetPlayerStatus(model)
     end
     
     if not Window.Flags["ESP/TeamCheck"] then
+        local isInOpen = false
+        if Window.Flags["ESP/WallCheck"] then
+            isInOpen = CheckWall(model)
+        end
+        
+        local isClosest = (Cache.ClosestEnemy == model)
+        if Window.Flags["ESP/ClosestEnemy"] and isClosest then
+            if isInOpen then
+                return "neutral", Color3.fromRGB(0, 255, 0)
+            else
+                return "neutral", Color3.fromRGB(200, 0, 255)
+            end
+        end
+        
+        if isInOpen then
+            return "neutral", Color3.fromRGB(0, 255, 0)
+        end
+        
         return "neutral", enemyColor
     end
     
     if Cache.ConfirmedEnemies[model] then
+        local isInOpen = false
+        if Window.Flags["ESP/WallCheck"] then
+            isInOpen = CheckWall(model)
+        end
+        
+        local isClosest = (Cache.ClosestEnemy == model)
+        if Window.Flags["ESP/ClosestEnemy"] and isClosest then
+            if isInOpen then
+                return "enemy", Color3.fromRGB(0, 255, 0)
+            else
+                return "enemy", Color3.fromRGB(200, 0, 255)
+            end
+        end
+        
+        if isInOpen then
+            return "enemy", Color3.fromRGB(0, 255, 0)
+        end
+        
         return "enemy", enemyColor
     end
     
@@ -433,11 +487,6 @@ local function CreateESPObject()
         Distance = Drawing.new("Text"),
         Tracer = Drawing.new("Line"),
         Fill = Drawing.new("Square"),
-        HealthBar = {
-            Outline = Drawing.new("Square"),
-            Fill = Drawing.new("Square"),
-            Text = Drawing.new("Text")
-        },
         Skeleton = {
             Head = Drawing.new("Line"),
             UpperSpine = Drawing.new("Line"),
@@ -493,16 +542,6 @@ local function CreateESPObject()
     obj.Fill.Transparency = 0.15
     obj.Fill.Visible = false
     
-    obj.HealthBar.Outline.Filled = false
-    obj.HealthBar.Outline.Thickness = 1
-    obj.HealthBar.Outline.Visible = false
-    obj.HealthBar.Fill.Filled = true
-    obj.HealthBar.Fill.Visible = false
-    obj.HealthBar.Text.Size = 12
-    obj.HealthBar.Text.Font = Drawing.Fonts.Plex
-    obj.HealthBar.Text.Outline = true
-    obj.HealthBar.Text.Visible = false
-    
     for _, line in pairs(obj.Skeleton) do
         line.Thickness = 1.5
         line.Visible = false
@@ -528,11 +567,6 @@ local function HideESP(obj)
     if obj.Distance then obj.Distance.Visible = false end
     if obj.Tracer then obj.Tracer.Visible = false end
     if obj.Fill then obj.Fill.Visible = false end
-    if obj.HealthBar then
-        if obj.HealthBar.Outline then obj.HealthBar.Outline.Visible = false end
-        if obj.HealthBar.Fill then obj.HealthBar.Fill.Visible = false end
-        if obj.HealthBar.Text then obj.HealthBar.Text.Visible = false end
-    end
     if obj.Skeleton then
         for _, line in pairs(obj.Skeleton) do
             if line then line.Visible = false end
@@ -558,11 +592,6 @@ local function DestroyESP(obj)
         if obj.Distance then obj.Distance:Remove() end
         if obj.Tracer then obj.Tracer:Remove() end
         if obj.Fill then obj.Fill:Remove() end
-        if obj.HealthBar then
-            if obj.HealthBar.Outline then obj.HealthBar.Outline:Remove() end
-            if obj.HealthBar.Fill then obj.HealthBar.Fill:Remove() end
-            if obj.HealthBar.Text then obj.HealthBar.Text:Remove() end
-        end
         if obj.Skeleton then
             for _, line in pairs(obj.Skeleton) do
                 if line then line:Remove() end
@@ -939,65 +968,6 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         obj.Tracer.Visible = true
     else
         obj.Tracer.Visible = false
-    end
-    
-    if Window.Flags["ESP/HealthBar"] then
-        local humanoid = GetHumanoid(model)
-        if humanoid and humanoid.Health >= 0 and humanoid.MaxHealth > 0 then
-            local health = math.max(humanoid.Health, 0)
-            local maxHealth = humanoid.MaxHealth
-            
-            if maxHealth > 0 then
-                local healthPercent = math.clamp(health / maxHealth, 0, 1)
-                
-                local barHeight = math.max(actualBoxH * 0.8, 20)
-                local barWidth = 4
-                local barPos = Vector2.new(
-                    actualLeft - barWidth - 2,
-                    actualTop + (actualBoxH - barHeight) / 2
-                )
-                
-                if obj.HealthBar and obj.HealthBar.Outline then
-                    obj.HealthBar.Outline.Size = Vector2.new(barWidth, barHeight)
-                    obj.HealthBar.Outline.Position = barPos
-                    obj.HealthBar.Outline.Color = color
-                    obj.HealthBar.Outline.Visible = true
-                    
-                    local fillHeight = math.max(barHeight * healthPercent, 1)
-                    obj.HealthBar.Fill.Size = Vector2.new(barWidth - 2, fillHeight)
-                    obj.HealthBar.Fill.Position = Vector2.new(barPos.X + 1, barPos.Y + barHeight * (1 - healthPercent))
-                    obj.HealthBar.Fill.Color = Color3.fromRGB(255 - (255 * healthPercent), 255 * healthPercent, 0)
-                    obj.HealthBar.Fill.Visible = true
-                    
-                    if Window.Flags["ESP/HealthText"] then
-                        obj.HealthBar.Text.Text = math.floor(health) .. "/" .. math.floor(maxHealth)
-                        obj.HealthBar.Text.Position = Vector2.new(barPos.X + barWidth + 2, barPos.Y + barHeight / 2)
-                        obj.HealthBar.Text.Color = color
-                        obj.HealthBar.Text.Visible = true
-                    else
-                        obj.HealthBar.Text.Visible = false
-                    end
-                end
-            else
-                if obj.HealthBar then
-                    obj.HealthBar.Outline.Visible = false
-                    obj.HealthBar.Fill.Visible = false
-                    obj.HealthBar.Text.Visible = false
-                end
-            end
-        else
-            if obj.HealthBar then
-                obj.HealthBar.Outline.Visible = false
-                obj.HealthBar.Fill.Visible = false
-                obj.HealthBar.Text.Visible = false
-            end
-        end
-    else
-        if obj.HealthBar then
-            obj.HealthBar.Outline.Visible = false
-            obj.HealthBar.Fill.Visible = false
-            obj.HealthBar.Text.Visible = false
-        end
     end
     
     if Window.Flags["ESP/Skeleton"] then
@@ -1479,6 +1449,9 @@ local function MainLoop()
         local myPos = GetLocalPosition()
         local maxDistSq = (Window.Flags["ESP/MaxDistance"] or 500) * (Window.Flags["ESP/MaxDistance"] or 500)
         
+        Cache.ClosestEnemy = nil
+        local closestDist = math.huge
+        
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
@@ -1493,6 +1466,14 @@ local function MainLoop()
             local distVec = rootPos - myPos
             local distSq = distVec.X * distVec.X + distVec.Y * distVec.Y + distVec.Z * distVec.Z
             if distSq > maxDistSq then continue end
+            
+            if Window.Flags["ESP/ClosestEnemy"] then
+                local dist = math.sqrt(distSq)
+                if dist < closestDist then
+                    closestDist = dist
+                    Cache.ClosestEnemy = model
+                end
+            end
             
             local espObj = GetPooledESP()
             RenderESP(espObj, model, cam, screenSize, screenCenter, myPos)
@@ -1646,6 +1627,8 @@ local function Initialize()
     
     getgenv().Window = Window
     
+    Window:AutoLoadConfig("Varus/Deadline")
+    
     local ESPTab = Window:Tab({Name = "ESP"}) do
         local ESPSettingsSection = ESPTab:Section({Name = "ESP Settings", Side = "Left"}) do
             ESPSettingsSection:Toggle({Name = "Enable ESP", Flag = "ESP/Enabled", Value = true})
@@ -1658,9 +1641,9 @@ local function Initialize()
             ESPSettingsSection:Toggle({Name = "Box Fill", Flag = "ESP/BoxFill", Value = false})
             ESPSettingsSection:Toggle({Name = "Name", Flag = "ESP/Name", Value = true})
             ESPSettingsSection:Toggle({Name = "Distance", Flag = "ESP/Distance", Value = true})
-            ESPSettingsSection:Toggle({Name = "Health Bar", Flag = "ESP/HealthBar", Value = false})
-            ESPSettingsSection:Toggle({Name = "Health Text", Flag = "ESP/HealthText", Value = true})
             ESPSettingsSection:Toggle({Name = "Skeleton", Flag = "ESP/Skeleton", Value = false})
+            ESPSettingsSection:Toggle({Name = "Wall Check", Flag = "ESP/WallCheck", Value = false})
+            ESPSettingsSection:Toggle({Name = "Closest Enemy", Flag = "ESP/ClosestEnemy", Value = false})
             ESPSettingsSection:Slider({Name = "Skeleton Thickness", Flag = "ESP/SkeletonThickness", Min = 1, Max = 5, Value = 1.5, Precise = 1})
             ESPSettingsSection:Slider({Name = "Max Distance", Flag = "ESP/MaxDistance", Min = 500, Max = 3000, Value = 500, Step = 50})
             ESPSettingsSection:Toggle({Name = "Tracer", Flag = "ESP/Tracer", Value = false})
@@ -1735,6 +1718,100 @@ local function Initialize()
                     Window.Enabled = not Window.Enabled
                 end
             end})
+        end
+        
+        local ConfigSection = OptionsTab:Section({Name = "Config", Side = "Right"}) do
+            local FolderName = "Varus/Deadline"
+            local ConfigList = {}
+            local ConfigDropdown = ConfigSection:Dropdown({Name = "Config", Flag = "Config/Selected", List = ConfigList, IgnoreFlag = true})
+            
+            local ConfigTextbox = ConfigSection:Textbox({Name = "Config Name", Flag = "Config/Name", IgnoreFlag = true, Placeholder = "Enter config name"})
+            
+            local HttpService = game:GetService("HttpService")
+            
+            local function UpdateConfigList()
+                if not isfolder(FolderName) then makefolder(FolderName) end
+                if not isfolder(FolderName .. "\\Configs") then makefolder(FolderName .. "\\Configs") end
+                if not isfile(FolderName .. "\\AutoLoads.json") then writefile(FolderName .. "\\AutoLoads.json", "[]") end
+                
+                local AutoLoads = HttpService:JSONDecode(readfile(FolderName .. "\\AutoLoads.json"))
+                local AutoLoad = AutoLoads[tostring(game.GameId)]
+                
+                ConfigList = {}
+                for _, Config in pairs(listfiles(FolderName .. "\\Configs") or {}) do
+                    Config = Config:gsub(FolderName .. "\\Configs\\", "")
+                    Config = Config:gsub(".json", "")
+                    ConfigList[#ConfigList + 1] = {
+                        Name = Config,
+                        Mode = "Button",
+                        Value = Config == AutoLoad
+                    }
+                end
+                ConfigDropdown:Clear()
+                ConfigDropdown:BulkAdd(ConfigList)
+            end
+            
+            UpdateConfigList()
+            
+            ConfigSection:Button({Name = "Save Config", Callback = function()
+                if ConfigTextbox.Value and ConfigTextbox.Value ~= "" then
+                    Window:SaveConfig(FolderName, ConfigTextbox.Value)
+                    UpdateConfigList()
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config",
+                        Description = "Config saved: " .. ConfigTextbox.Value,
+                        Duration = 3
+                    })
+                elseif ConfigDropdown.Value and ConfigDropdown.Value[1] then
+                    Window:SaveConfig(FolderName, ConfigDropdown.Value[1])
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config",
+                        Description = "Config saved: " .. ConfigDropdown.Value[1],
+                        Duration = 3
+                    })
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config",
+                        Description = "Please enter a config name or select a config",
+                        Duration = 3
+                    })
+                end
+            end})
+            
+            ConfigSection:Button({Name = "Load Config", Callback = function()
+                if ConfigDropdown.Value and ConfigDropdown.Value[1] then
+                    Window:LoadConfig(FolderName, ConfigDropdown.Value[1])
+                    UpdateConfigList()
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config",
+                        Description = "Config loaded: " .. ConfigDropdown.Value[1],
+                        Duration = 3
+                    })
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config",
+                        Description = "Please select a config to load",
+                        Duration = 3
+                    })
+                end
+            end})
+            
+            ConfigSection:Button({Name = "Reset Config", Callback = function()
+                for _, element in pairs(Window.Elements) do
+                    if element.Flag and not element.IgnoreFlag then
+                        if element.DefaultValue ~= nil then
+                            element.Value = element.DefaultValue
+                        end
+                    end
+                end
+                Parvus.Utilities.UI:Push({
+                    Title = "Config",
+                    Description = "Config reset to defaults",
+                    Duration = 3
+                })
+            end})
+            
+            ConfigSection:Button({Name = "Refresh List", Callback = UpdateConfigList})
         end
     end
     
