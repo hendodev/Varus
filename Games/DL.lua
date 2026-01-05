@@ -653,35 +653,18 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         return
     end
     
-    local camCFrame = cam.CFrame
-    local camPosition = camCFrame.Position
-    local camLookVector = camCFrame.LookVector
+    local screenPos, onScreen = cam:WorldToViewportPoint(rootPos)
     
-    local relativePos = rootPos - camPosition
-    local dotProduct = camLookVector:Dot(relativePos.Unit)
-    
-    if dotProduct <= 0 then
+    if not onScreen or screenPos.Z <= 0 then
         HideESP(obj)
         return
     end
     
-    local viewportSize = cam.ViewportSize
-    local fov = math.rad(cam.FieldOfView)
-    local distance = relativePos.Magnitude
+    local cx, cy = screenPos.X, screenPos.Y
     
-    local screenX = (viewportSize.X / 2) + (relativePos.X / relativePos.Z) * (viewportSize.X / (2 * math.tan(fov / 2)))
-    local screenY = (viewportSize.Y / 2) - (relativePos.Y / relativePos.Z) * (viewportSize.Y / (2 * math.tan(fov / 2)))
-    
-    if screenX < -100 or screenX > viewportSize.X + 100 or screenY < -100 or screenY > viewportSize.Y + 100 then
-        HideESP(obj)
-        return
-    end
-    
-    local baseHeight = 1200 / math.max(distance, 1)
+    local baseHeight = 1200 / math.max(screenPos.Z, 1)
     local boxH = math.clamp(baseHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
     local boxW = boxH * Tuning.BoxRatio
-    
-    local cx, cy = screenX, screenY
     
     local status, color = GetPlayerStatus(model)
     
@@ -699,13 +682,17 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         modelWidth = math.max(torsoToRoot * 1.5, 2.5)
     end
     
-    local modelSizeScreen = cam:WorldToViewportPoint(root.Position + Vector3.new(modelWidth, modelHeight, 0))
-    local rootScreen = cam:WorldToViewportPoint(root.Position)
-    local screenModelHeight = math.abs(modelSizeScreen.Y - rootScreen.Y) * 2
-    local screenModelWidth = math.abs(modelSizeScreen.X - rootScreen.X) * 2
+    local head = GetHead(model)
+    if head then
+        local headScreen = cam:WorldToViewportPoint(head.Position)
+        if headScreen.Z > 0 then
+            local headHeight = math.abs(headScreen.Y - cy) * 2.2
+            boxH = math.max(boxH, headHeight)
+        end
+    end
     
-    local actualBoxH = math.max(screenModelHeight, boxH)
-    local actualBoxW = math.max(screenModelWidth, boxW)
+    local actualBoxH = boxH
+    local actualBoxW = boxW
     
     local actualHalfW, actualHalfH = actualBoxW / 2, actualBoxH / 2
     local actualTop = cy - actualHalfH * 1.1
@@ -773,30 +760,26 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
             
             local size = Vector3.new(modelWidth, modelHeight, modelDepth)
             
-            local function worldToScreen(worldPos)
-                local relativePos = worldPos - camPosition
-                local dotProduct = camLookVector:Dot(relativePos.Unit)
-                if dotProduct <= 0 then return nil end
-                local distance = relativePos.Magnitude
-                local fov = math.rad(cam.FieldOfView)
-                local screenX = (viewportSize.X / 2) + (relativePos.X / relativePos.Z) * (viewportSize.X / (2 * math.tan(fov / 2)))
-                local screenY = (viewportSize.Y / 2) - (relativePos.Y / relativePos.Z) * (viewportSize.Y / (2 * math.tan(fov / 2)))
-                return Vector2.new(screenX, screenY), distance
-            end
+            local frontTL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, -size.Z/2)).Position)
+            local frontTR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, -size.Z/2)).Position)
+            local frontBL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2)).Position)
+            local frontBR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, -size.Z/2)).Position)
             
-            local frontTL, frontTLZ = worldToScreen((rootCF * CFrame.new(-size.X/2, size.Y/2, -size.Z/2)).Position)
-            local frontTR, frontTRZ = worldToScreen((rootCF * CFrame.new(size.X/2, size.Y/2, -size.Z/2)).Position)
-            local frontBL, frontBLZ = worldToScreen((rootCF * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2)).Position)
-            local frontBR, frontBRZ = worldToScreen((rootCF * CFrame.new(size.X/2, -size.Y/2, -size.Z/2)).Position)
+            local backTL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, size.Z/2)).Position)
+            local backTR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, size.Z/2)).Position)
+            local backBL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, size.Z/2)).Position)
+            local backBR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, size.Z/2)).Position)
             
-            local backTL, backTLZ = worldToScreen((rootCF * CFrame.new(-size.X/2, size.Y/2, size.Z/2)).Position)
-            local backTR, backTRZ = worldToScreen((rootCF * CFrame.new(size.X/2, size.Y/2, size.Z/2)).Position)
-            local backBL, backBLZ = worldToScreen((rootCF * CFrame.new(-size.X/2, -size.Y/2, size.Z/2)).Position)
-            local backBR, backBRZ = worldToScreen((rootCF * CFrame.new(size.X/2, -size.Y/2, size.Z/2)).Position)
-            
-            if not (frontTL and frontTR and frontBL and frontBR and backTL and backTR and backBL and backBR) then
+            if not (frontTL.Z > 0 and frontTR.Z > 0 and frontBL.Z > 0 and frontBR.Z > 0 and
+                   backTL.Z > 0 and backTR.Z > 0 and backBL.Z > 0 and backBR.Z > 0) then
                 return
             end
+            
+            local function toVector2(v3) return Vector2.new(v3.X, v3.Y) end
+            frontTL, frontTR = toVector2(frontTL), toVector2(frontTR)
+            frontBL, frontBR = toVector2(frontBL), toVector2(frontBR)
+            backTL, backTR = toVector2(backTL), toVector2(backTR)
+            backBL, backBR = toVector2(backBL), toVector2(backBR)
             
             local front = {
                 TL = frontTL,
@@ -997,11 +980,11 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         end
         local origin
         if tracerOrigin == 1 then
-            origin = Vector2.new(viewportSize.X / 2, viewportSize.Y)
+            origin = Vector2.new(screenCenter.X, screenSize.Y)
         elseif tracerOrigin == 2 then
-            origin = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+            origin = screenCenter
         else
-            origin = Vector2.new(viewportSize.X / 2, 0)
+            origin = Vector2.new(screenCenter.X, 0)
         end
         obj.Tracer.From = origin
         obj.Tracer.To = Vector2.new(cx, bottom)
@@ -1044,36 +1027,31 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
                 line.Visible = false
             end
             
-            local function worldToScreenBone(worldPos)
-                local relativePos = worldPos - camPosition
-                local dotProduct = camLookVector:Dot(relativePos.Unit)
-                if dotProduct <= 0 then return nil, false end
-                local distance = relativePos.Magnitude
-                local fov = math.rad(cam.FieldOfView)
-                local screenX = (viewportSize.X / 2) + (relativePos.X / relativePos.Z) * (viewportSize.X / (2 * math.tan(fov / 2)))
-                local screenY = (viewportSize.Y / 2) - (relativePos.Y / relativePos.Z) * (viewportSize.Y / (2 * math.tan(fov / 2)))
-                if screenX < -100 or screenX > viewportSize.X + 100 or screenY < -100 or screenY > viewportSize.Y + 100 then
-                    return nil, false
-                end
-                return Vector2.new(screenX, screenY), true
-            end
-            
             local function drawBoneStable(from, to, line)
                 if not from or not to then 
                     line.Visible = false
                     return 
                 end
                 
-                local fromScreen, fromVisible = worldToScreenBone(from.Position)
-                local toScreen, toVisible = worldToScreenBone(to.Position)
+                local fromScreen, fromVisible = cam:WorldToViewportPoint(from.Position)
+                local toScreen, toVisible = cam:WorldToViewportPoint(to.Position)
                 
-                if not (fromVisible and toVisible) then
+                if not (fromVisible and toVisible) or fromScreen.Z < 0 or toScreen.Z < 0 then
                     line.Visible = false
                     return
                 end
                 
-                line.From = fromScreen
-                line.To = toScreen
+                local screenBounds = cam.ViewportSize
+                if fromScreen.X < -100 or fromScreen.X > screenBounds.X + 100 or
+                   fromScreen.Y < -100 or fromScreen.Y > screenBounds.Y + 100 or
+                   toScreen.X < -100 or toScreen.X > screenBounds.X + 100 or
+                   toScreen.Y < -100 or toScreen.Y > screenBounds.Y + 100 then
+                    line.Visible = false
+                    return
+                end
+                
+                line.From = Vector2.new(fromScreen.X, fromScreen.Y)
+                line.To = Vector2.new(toScreen.X, toScreen.Y)
                 
                 local skeletonColor = color
                 if Window.Flags["ESP/SkeletonColor"] then
