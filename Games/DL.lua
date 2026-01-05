@@ -955,6 +955,133 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         obj.HealthBar.Fill.Visible = false
         obj.HealthBar.Text.Visible = false
     end
+    
+    -- Skeleton ESP (R6 compatible)
+    if Window.Flags["ESP/Skeleton"] then
+        local function getBonePositions(model)
+            if not model then return nil end
+            
+            -- R6 structure: Head, Torso, Left Arm, Right Arm, Left Leg, Right Leg
+            local bones = {
+                Head = GetHead(model),
+                Torso = GetTorso(model),
+                RootPart = GetRoot(model)
+            }
+            
+            -- R6 limbs
+            bones.LeftArm = model:FindFirstChild("Left Arm") or model:FindFirstChild("left_arm")
+            bones.RightArm = model:FindFirstChild("Right Arm") or model:FindFirstChild("right_arm")
+            bones.LeftLeg = model:FindFirstChild("Left Leg") or model:FindFirstChild("left_leg")
+            bones.RightLeg = model:FindFirstChild("Right Leg") or model:FindFirstChild("right_leg")
+            
+            -- Verify we have minimum required bones
+            if not (bones.Head and bones.Torso and bones.RootPart) then return nil end
+            
+            return bones
+        end
+        
+        local function drawBone(from, to, line, cam)
+            if not from or not to then 
+                line.Visible = false
+                return 
+            end
+            
+            local fromPos = from.Position
+            local toPos = to.Position
+            
+            local fromScreen, fromVisible = cam:WorldToViewportPoint(fromPos)
+            local toScreen, toVisible = cam:WorldToViewportPoint(toPos)
+            
+            if not (fromVisible and toVisible) or fromScreen.Z < 0 or toScreen.Z < 0 then
+                line.Visible = false
+                return
+            end
+            
+            local screenBounds = cam.ViewportSize
+            if fromScreen.X < -100 or fromScreen.X > screenBounds.X + 100 or
+               fromScreen.Y < -100 or fromScreen.Y > screenBounds.Y + 100 or
+               toScreen.X < -100 or toScreen.X > screenBounds.X + 100 or
+               toScreen.Y < -100 or toScreen.Y > screenBounds.Y + 100 then
+                line.Visible = false
+                return
+            end
+            
+            line.From = Vector2.new(fromScreen.X, fromScreen.Y)
+            line.To = Vector2.new(toScreen.X, toScreen.Y)
+            
+            local skeletonColor = color
+            if Window.Flags["ESP/SkeletonColor"] then
+                local colorData = Window.Flags["ESP/SkeletonColor"]
+                if type(colorData) == "table" and colorData[6] then
+                    skeletonColor = colorData[6]
+                elseif typeof(colorData) == "Color3" then
+                    skeletonColor = colorData
+                end
+            end
+            
+            line.Color = skeletonColor
+            line.Thickness = Window.Flags["ESP/SkeletonThickness"] or 1.5
+            line.Visible = true
+        end
+        
+        local bones = getBonePositions(model)
+        if bones then
+            -- Spine & Head
+            drawBone(bones.Head, bones.Torso, obj.Skeleton.Head, cam)
+            drawBone(bones.Torso, bones.RootPart, obj.Skeleton.UpperSpine, cam)
+            
+            -- Arms (R6)
+            if bones.LeftArm then
+                drawBone(bones.Torso, bones.LeftArm, obj.Skeleton.LeftShoulder, cam)
+                -- R6 doesn't have separate upper/lower arm, so we'll just draw shoulder
+                obj.Skeleton.LeftUpperArm.Visible = false
+                obj.Skeleton.LeftLowerArm.Visible = false
+            else
+                obj.Skeleton.LeftShoulder.Visible = false
+                obj.Skeleton.LeftUpperArm.Visible = false
+                obj.Skeleton.LeftLowerArm.Visible = false
+            end
+            
+            if bones.RightArm then
+                drawBone(bones.Torso, bones.RightArm, obj.Skeleton.RightShoulder, cam)
+                obj.Skeleton.RightUpperArm.Visible = false
+                obj.Skeleton.RightLowerArm.Visible = false
+            else
+                obj.Skeleton.RightShoulder.Visible = false
+                obj.Skeleton.RightUpperArm.Visible = false
+                obj.Skeleton.RightLowerArm.Visible = false
+            end
+            
+            -- Legs (R6)
+            if bones.LeftLeg then
+                drawBone(bones.RootPart, bones.LeftLeg, obj.Skeleton.LeftHip, cam)
+                obj.Skeleton.LeftUpperLeg.Visible = false
+                obj.Skeleton.LeftLowerLeg.Visible = false
+            else
+                obj.Skeleton.LeftHip.Visible = false
+                obj.Skeleton.LeftUpperLeg.Visible = false
+                obj.Skeleton.LeftLowerLeg.Visible = false
+            end
+            
+            if bones.RightLeg then
+                drawBone(bones.RootPart, bones.RightLeg, obj.Skeleton.RightHip, cam)
+                obj.Skeleton.RightUpperLeg.Visible = false
+                obj.Skeleton.RightLowerLeg.Visible = false
+            else
+                obj.Skeleton.RightHip.Visible = false
+                obj.Skeleton.RightUpperLeg.Visible = false
+                obj.Skeleton.RightLowerLeg.Visible = false
+            end
+        else
+            for _, line in pairs(obj.Skeleton) do
+                line.Visible = false
+            end
+        end
+    else
+        for _, line in pairs(obj.Skeleton) do
+            line.Visible = false
+        end
+    end
 end
 
 local function CreateChams(model)
