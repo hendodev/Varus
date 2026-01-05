@@ -169,45 +169,6 @@ local function ScanFriendlyIndicators()
     end
 end
 
-local function VerifyFriendlyByTeam(model)
-    local Teams = game:GetService("Teams")
-    local LocalPlayer = Players.LocalPlayer
-    local myTeam = LocalPlayer.Team
-    
-    if not myTeam then return false end
-    
-    local root = GetRoot(model)
-    if not root then return false end
-    
-    local modelPos = root.Position
-    
-    for _, player in pairs(Players:GetPlayers()) do
-        if player.Team == myTeam and player ~= LocalPlayer and player.Character then
-            local charRoot = player.Character:FindFirstChild("HumanoidRootPart") or player.Character:FindFirstChild("humanoid_root_part")
-            if charRoot then
-                local dist = (charRoot.Position - modelPos).Magnitude
-                if dist < 2 then
-                    return true
-                end
-            end
-        end
-    end
-    
-    local success, result = pcall(function()
-        if model:FindFirstChild("Team") then
-            local modelTeam = model.Team
-            if typeof(modelTeam) == "Instance" and modelTeam:IsA("Team") then
-                return (modelTeam == myTeam)
-            elseif typeof(modelTeam) == "string" then
-                return (modelTeam == myTeam.Name)
-            end
-        end
-        return false
-    end)
-    
-    return success and result == true
-end
-
 local function DetectTeammates()
     local Window = getgenv().Window
     if not Window or Window.Flags["ESP/TeamCheck"] then return end
@@ -218,16 +179,53 @@ local function DetectTeammates()
     
     if not myTeam then return end
     
+    local myTeamPlayers = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Team == myTeam and player ~= LocalPlayer then
+            myTeamPlayers[player] = true
+        end
+    end
+    
     for model in pairs(Cache.Soldiers) do
         if not IsValidModel(model) then continue end
         
-        local isTeammate = VerifyFriendlyByTeam(model)
+        local root = GetRoot(model)
+        if not root then continue end
+        
+        local modelPos = root.Position
+        local isTeammate = false
+        
+        for player, _ in pairs(myTeamPlayers) do
+            if player.Character then
+                local charRoot = player.Character:FindFirstChild("HumanoidRootPart") or player.Character:FindFirstChild("humanoid_root_part")
+                if charRoot then
+                    local dist = (charRoot.Position - modelPos).Magnitude
+                    if dist < 2 then
+                        isTeammate = true
+                        break
+                    end
+                end
+            end
+        end
+        
+        if not isTeammate then
+            pcall(function()
+                if model:FindFirstChild("Team") then
+                    local modelTeam = model.Team
+                    if typeof(modelTeam) == "Instance" and modelTeam:IsA("Team") then
+                        isTeammate = (modelTeam == myTeam)
+                    elseif typeof(modelTeam) == "string" then
+                        isTeammate = (modelTeam == myTeam.Name)
+                    end
+                end
+            end)
+        end
         
         if isTeammate then
             Cache.Friendlies[model] = true
             Cache.ConfirmedEnemies[model] = nil
             Cache.EnemyConfirmations[model] = 0
-            Cache.FriendlyScores[model] = 10
+            Cache.FriendlyScores[model] = 8
         else
             if Cache.Friendlies[model] then
                 Cache.Friendlies[model] = nil
@@ -263,16 +261,6 @@ local function UpdateFriendlyStatus()
         local root = GetRoot(model)
         if not root then continue end
         
-        local isFriendlyByTeam = VerifyFriendlyByTeam(model)
-        
-        if isFriendlyByTeam then
-            Cache.Friendlies[model] = true
-            Cache.ConfirmedEnemies[model] = nil
-            Cache.EnemyConfirmations[model] = 0
-            Cache.FriendlyScores[model] = 10
-            continue
-        end
-        
         local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
         
         if not onScreen or screenPos.Z <= 0 then
@@ -294,21 +282,9 @@ local function UpdateFriendlyStatus()
         if foundIndicator then
             Cache.Friendlies[model] = true
             Cache.ConfirmedEnemies[model] = nil
-            Cache.EnemyConfirmations[model] = 0
-            Cache.FriendlyScores[model] = 10
         else
-            if Cache.Friendlies[model] == true then
-                local friendlyScore = Cache.FriendlyScores[model] or 10
-                friendlyScore = math.max(0, friendlyScore - 1)
-                Cache.FriendlyScores[model] = friendlyScore
-                
-                if friendlyScore <= 0 then
-                    Cache.Friendlies[model] = nil
-                end
-            else
-                Cache.Friendlies[model] = nil
-                Cache.ConfirmedEnemies[model] = true
-            end
+            Cache.Friendlies[model] = nil
+            Cache.ConfirmedEnemies[model] = true
         end
     end
 end
@@ -319,18 +295,6 @@ local function IsFriendly(model)
     
     if not Window.Flags["ESP/TeamCheck"] then
         return Cache.Friendlies[model] == true
-    end
-    
-    if Cache.Friendlies[model] == true then
-        return true
-    end
-    
-    if VerifyFriendlyByTeam(model) then
-        Cache.Friendlies[model] = true
-        Cache.ConfirmedEnemies[model] = nil
-        Cache.EnemyConfirmations[model] = 0
-        Cache.FriendlyScores[model] = 10
-        return true
     end
     
     if Cache.ConfirmedEnemies[model] then return false end
@@ -344,6 +308,7 @@ local function IsChecking(model)
     if Cache.Friendlies[model] == true then return false end
     return true
 end
+
 
 local function GetPlayerStatus(model)
     local Window = getgenv().Window
@@ -1358,7 +1323,7 @@ local function MainLoop()
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
-            if Cache.Friendlies[model] == true then
+            if Window.Flags["ESP/TeamCheck"] and Cache.Friendlies[model] == true then
                 continue
             end
             
