@@ -34,7 +34,37 @@ local function LoadScript(Script)
     return loadstring(GetFile(Script .. ".lua"), Script)()
 end
 
+local function IsDeadlineGame()
+    -- Check for Deadline-specific identifiers
+    local Workspace = game:GetService("Workspace")
+    
+    -- Check if "characters" folder exists (Deadline-specific identifier)
+    local charactersFolder = Workspace:FindFirstChild("characters")
+    if charactersFolder then
+        return true
+    end
+    
+    -- Try waiting for it with a short timeout
+    local success, result = pcall(function()
+        return Workspace:WaitForChild("characters", 3)
+    end)
+    
+    return success and result ~= nil
+end
+
 local function GetGameInfo()
+    -- Special check for Deadline - verify it's actually Deadline before loading
+    if tostring(game.GameId) == "12144402492" then
+        if IsDeadlineGame() then
+            return Parvus.Games["12144402492"]
+        else
+            -- Game ID matches but structure doesn't match Deadline
+            -- Fall back to Universal instead
+            warn("Game ID matches Deadline but game structure doesn't match. Loading Universal instead.")
+            return Parvus.Games.Universal
+        end
+    end
+    
     for Id, Info in pairs(Parvus.Games) do
         if tostring(game.GameId) == Id then
             return Info
