@@ -578,15 +578,12 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
     local headScreen2D = Vector2.new(headScreen.X, headScreen.Y)
     local rootScreen2D = Vector2.new(rootScreen.X, rootScreen.Y)
     
-    local screenHeight = math.abs(headScreen2D.Y - rootScreen2D.Y) * 2.2
-    local screenWidth = screenHeight * Tuning.BoxRatio
-    
-    local boxH = math.clamp(screenHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
+    local baseHeight = 1200 / math.max(rootScreen.Z, 1)
+    local boxH = math.clamp(baseHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
     local boxW = boxH * Tuning.BoxRatio
     
-    local centerY = (headScreen2D.Y + rootScreen2D.Y) / 2
     local cx = rootScreen2D.X
-    local cy = centerY
+    local cy = rootScreen2D.Y - (boxH * 0.55)
     
     local status, color = GetPlayerStatus(model)
     
