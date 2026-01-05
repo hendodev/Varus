@@ -660,51 +660,18 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         return
     end
     
-    local cx, cy = screenPos.X, screenPos.Y
-    
     local baseHeight = 1200 / math.max(screenPos.Z, 1)
     local boxH = math.clamp(baseHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
     local boxW = boxH * Tuning.BoxRatio
     
-    local status, color = GetPlayerStatus(model)
-    
-    local head = GetHead(model)
-    local torso = GetTorso(model)
-    local modelHeight = 5
-    local modelWidth = 2.5
-    
-    if head and root then
-        local headToRoot = (head.Position - root.Position).Magnitude
-        modelHeight = headToRoot * 2.2
-    end
-    if torso and root then
-        local torsoToRoot = (torso.Position - root.Position).Magnitude
-        modelWidth = math.max(torsoToRoot * 1.5, 2.5)
-    end
-    
-    local head = GetHead(model)
-    if head then
-        local headScreen = cam:WorldToViewportPoint(head.Position)
-        if headScreen.Z > 0 then
-            local headHeight = math.abs(headScreen.Y - cy) * 2.2
-            boxH = math.max(boxH, headHeight)
-        end
-    end
-    
-    local actualBoxH = boxH
-    local actualBoxW = boxW
-    
-    local actualHalfW, actualHalfH = actualBoxW / 2, actualBoxH / 2
-    local actualTop = cy - actualHalfH * 1.1
-    local actualBottom = cy + actualHalfH * 0.9
-    local actualLeft = cx - actualHalfW
-    local actualRight = cx + actualHalfW
-    
+    local cx, cy = screenPos.X, screenPos.Y
     local halfW, halfH = boxW / 2, boxH / 2
     local top = cy - halfH * 1.1
     local bottom = cy + halfH * 0.9
     local left = cx - halfW
     local right = cx + halfW
+    
+    local status, color = GetPlayerStatus(model)
     
     if Window.Flags["ESP/Box"] then
         local boxStyleValue = Window.Flags["ESP/BoxStyle"]
@@ -713,198 +680,64 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
             boxStyle = boxStyleValue[1]
         end
         
-        for i = 1, 4 do obj.Box[i].Visible = false end
-        for i = 1, 8 do obj.Corners[i].Visible = false end
-        if obj.Box3D then
-            for _, line in pairs(obj.Box3D) do
-                line.Visible = false
-            end
-        end
-        
         if boxStyle == "ThreeD" then
-            local rootCF = root.CFrame
-            local head = GetHead(model)
-            local torso = GetTorso(model)
-            
-            local leftArm = model:FindFirstChild("left_arm_vis") or model:FindFirstChild("Left Arm") or model:FindFirstChild("left_arm")
-            local rightArm = model:FindFirstChild("right_arm_vis") or model:FindFirstChild("Right Arm") or model:FindFirstChild("right_arm")
-            local leftLeg = model:FindFirstChild("left_leg_vis") or model:FindFirstChild("Left Leg") or model:FindFirstChild("left_leg")
-            local rightLeg = model:FindFirstChild("right_leg_vis") or model:FindFirstChild("Right Leg") or model:FindFirstChild("right_leg")
-            
-            local modelHeight = 5
-            if head and root then
-                local headToRoot = (head.Position - root.Position).Magnitude
-                modelHeight = headToRoot * 2.2
-            end
-            
-            local modelWidth = 2.5
-            if torso and root then
-                local torsoToRoot = (torso.Position - root.Position).Magnitude
-                modelWidth = math.max(torsoToRoot * 1.5, 2.5)
-                
-                if leftArm and rightArm then
-                    local leftArmDist = (leftArm.Position - root.Position).Magnitude
-                    local rightArmDist = (rightArm.Position - root.Position).Magnitude
-                    local maxArmDist = math.max(leftArmDist, rightArmDist)
-                    modelWidth = math.max(modelWidth, maxArmDist * 1.2)
+            for i = 1, 4 do obj.Box[i].Visible = false end
+            for i = 1, 8 do obj.Corners[i].Visible = false end
+            if obj.Box3D then
+                for _, line in pairs(obj.Box3D) do
+                    line.Visible = false
                 end
             end
-            
-            local modelDepth = 1.5
-            if leftLeg and rightLeg then
-                local leftLegDist = (leftLeg.Position - root.Position).Magnitude
-                local rightLegDist = (rightLeg.Position - root.Position).Magnitude
-                local maxLegDist = math.max(leftLegDist, rightLegDist)
-                modelDepth = math.max(modelDepth, maxLegDist * 0.8)
-            end
-            
-            local size = Vector3.new(modelWidth, modelHeight, modelDepth)
-            
-            local frontTL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, -size.Z/2)).Position)
-            local frontTR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, -size.Z/2)).Position)
-            local frontBL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2)).Position)
-            local frontBR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, -size.Z/2)).Position)
-            
-            local backTL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, size.Z/2)).Position)
-            local backTR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, size.Z/2)).Position)
-            local backBL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, size.Z/2)).Position)
-            local backBR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, size.Z/2)).Position)
-            
-            if not (frontTL.Z > 0 and frontTR.Z > 0 and frontBL.Z > 0 and frontBR.Z > 0 and
-                   backTL.Z > 0 and backTR.Z > 0 and backBL.Z > 0 and backBR.Z > 0) then
-                return
-            end
-            
-            local function toVector2(v3) return Vector2.new(v3.X, v3.Y) end
-            frontTL, frontTR = toVector2(frontTL), toVector2(frontTR)
-            frontBL, frontBR = toVector2(frontBL), toVector2(frontBR)
-            backTL, backTR = toVector2(backTL), toVector2(backTR)
-            backBL, backBR = toVector2(backBL), toVector2(backBR)
-            
-            local front = {
-                TL = frontTL,
-                TR = frontTR,
-                BL = frontBL,
-                BR = frontBR
-            }
-            
-            local back = {
-                TL = backTL,
-                TR = backTR,
-                BL = backBL,
-                BR = backBR
-            }
-            
-            obj.Box3D.TopLeft.From = front.TL
-            obj.Box3D.TopLeft.To = front.TR
-            obj.Box3D.TopLeft.Color = color
-            obj.Box3D.TopLeft.Visible = true
-            
-            obj.Box3D.TopRight.From = front.TR
-            obj.Box3D.TopRight.To = front.BR
-            obj.Box3D.TopRight.Color = color
-            obj.Box3D.TopRight.Visible = true
-            
-            obj.Box3D.BottomLeft.From = front.BL
-            obj.Box3D.BottomLeft.To = front.BR
-            obj.Box3D.BottomLeft.Color = color
-            obj.Box3D.BottomLeft.Visible = true
-            
-            obj.Box3D.BottomRight.From = front.TL
-            obj.Box3D.BottomRight.To = front.BL
-            obj.Box3D.BottomRight.Color = color
-            obj.Box3D.BottomRight.Visible = true
-            
-            obj.Box3D.Left.From = back.TL
-            obj.Box3D.Left.To = back.TR
-            obj.Box3D.Left.Color = color
-            obj.Box3D.Left.Visible = true
-            
-            obj.Box3D.Right.From = back.TR
-            obj.Box3D.Right.To = back.BR
-            obj.Box3D.Right.Color = color
-            obj.Box3D.Right.Visible = true
-            
-            obj.Box3D.Top.From = back.BL
-            obj.Box3D.Top.To = back.BR
-            obj.Box3D.Top.Color = color
-            obj.Box3D.Top.Visible = true
-            
-            obj.Box3D.Bottom.From = back.TL
-            obj.Box3D.Bottom.To = back.BL
-            obj.Box3D.Bottom.Color = color
-            obj.Box3D.Bottom.Visible = true
-            
-            local connectors = {
-                {From = front.TL, To = back.TL},
-                {From = front.TR, To = back.TR},
-                {From = front.BL, To = back.BL},
-                {From = front.BR, To = back.BR}
-            }
-            
-            for i = 1, 4 do
-                if connectors[i] then
-                    obj.Box[i].From = connectors[i].From
-                    obj.Box[i].To = connectors[i].To
-                    obj.Box[i].Color = color
-                    obj.Box[i].Visible = true
-                end
-            end
-            
         elseif boxStyle == "Corner" then
-            local boxPosition = Vector2.new(actualLeft, actualTop)
-            local boxSize = Vector2.new(actualBoxW, actualBoxH)
-            local cornerSize = actualBoxW * 0.2
+            for i = 1, 4 do obj.Box[i].Visible = false end
+            if obj.Box3D then
+                for _, line in pairs(obj.Box3D) do
+                    line.Visible = false
+                end
+            end
             
-            obj.Corners[1].From = boxPosition
-            obj.Corners[1].To = boxPosition + Vector2.new(cornerSize, 0)
-            obj.Corners[1].Color = color
-            obj.Corners[1].Visible = true
+            local cl = Tuning.CornerLength
             
-            obj.Corners[2].From = boxPosition
-            obj.Corners[2].To = boxPosition + Vector2.new(0, cornerSize)
-            obj.Corners[2].Color = color
-            obj.Corners[2].Visible = true
+            obj.Corners[1].From = Vector2.new(left, top)
+            obj.Corners[1].To = Vector2.new(left + cl, top)
+            obj.Corners[2].From = Vector2.new(left, top)
+            obj.Corners[2].To = Vector2.new(left, top + cl)
             
-            obj.Corners[3].From = boxPosition + Vector2.new(boxSize.X, 0)
-            obj.Corners[3].To = boxPosition + Vector2.new(boxSize.X - cornerSize, 0)
-            obj.Corners[3].Color = color
-            obj.Corners[3].Visible = true
+            obj.Corners[3].From = Vector2.new(right, top)
+            obj.Corners[3].To = Vector2.new(right - cl, top)
+            obj.Corners[4].From = Vector2.new(right, top)
+            obj.Corners[4].To = Vector2.new(right, top + cl)
             
-            obj.Corners[4].From = boxPosition + Vector2.new(boxSize.X, 0)
-            obj.Corners[4].To = boxPosition + Vector2.new(boxSize.X, cornerSize)
-            obj.Corners[4].Color = color
-            obj.Corners[4].Visible = true
+            obj.Corners[5].From = Vector2.new(left, bottom)
+            obj.Corners[5].To = Vector2.new(left + cl, bottom)
+            obj.Corners[6].From = Vector2.new(left, bottom)
+            obj.Corners[6].To = Vector2.new(left, bottom - cl)
             
-            obj.Corners[5].From = boxPosition + Vector2.new(0, boxSize.Y)
-            obj.Corners[5].To = boxPosition + Vector2.new(cornerSize, boxSize.Y)
-            obj.Corners[5].Color = color
-            obj.Corners[5].Visible = true
+            obj.Corners[7].From = Vector2.new(right, bottom)
+            obj.Corners[7].To = Vector2.new(right - cl, bottom)
+            obj.Corners[8].From = Vector2.new(right, bottom)
+            obj.Corners[8].To = Vector2.new(right, bottom - cl)
             
-            obj.Corners[6].From = boxPosition + Vector2.new(0, boxSize.Y)
-            obj.Corners[6].To = boxPosition + Vector2.new(0, boxSize.Y - cornerSize)
-            obj.Corners[6].Color = color
-            obj.Corners[6].Visible = true
-            
-            obj.Corners[7].From = boxPosition + Vector2.new(boxSize.X, boxSize.Y)
-            obj.Corners[7].To = boxPosition + Vector2.new(boxSize.X - cornerSize, boxSize.Y)
-            obj.Corners[7].Color = color
-            obj.Corners[7].Visible = true
-            
-            obj.Corners[8].From = boxPosition + Vector2.new(boxSize.X, boxSize.Y)
-            obj.Corners[8].To = boxPosition + Vector2.new(boxSize.X, boxSize.Y - cornerSize)
-            obj.Corners[8].Color = color
-            obj.Corners[8].Visible = true
-            
+            for i = 1, 8 do
+                obj.Corners[i].Color = color
+                obj.Corners[i].Visible = true
+            end
         else
-            obj.Box[1].From = Vector2.new(actualLeft, actualTop)
-            obj.Box[1].To = Vector2.new(actualRight, actualTop)
-            obj.Box[2].From = Vector2.new(actualRight, actualTop)
-            obj.Box[2].To = Vector2.new(actualRight, actualBottom)
-            obj.Box[3].From = Vector2.new(actualRight, actualBottom)
-            obj.Box[3].To = Vector2.new(actualLeft, actualBottom)
-            obj.Box[4].From = Vector2.new(actualLeft, actualBottom)
-            obj.Box[4].To = Vector2.new(actualLeft, actualTop)
+            for i = 1, 8 do obj.Corners[i].Visible = false end
+            if obj.Box3D then
+                for _, line in pairs(obj.Box3D) do
+                    line.Visible = false
+                end
+            end
+            
+            obj.Box[1].From = Vector2.new(left, top)
+            obj.Box[1].To = Vector2.new(right, top)
+            obj.Box[2].From = Vector2.new(right, top)
+            obj.Box[2].To = Vector2.new(right, bottom)
+            obj.Box[3].From = Vector2.new(right, bottom)
+            obj.Box[3].To = Vector2.new(left, bottom)
+            obj.Box[4].From = Vector2.new(left, bottom)
+            obj.Box[4].To = Vector2.new(left, top)
             
             for i = 1, 4 do
                 obj.Box[i].Color = color
@@ -922,8 +755,8 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
     end
     
     if Window.Flags["ESP/BoxFill"] then
-        obj.Fill.Position = Vector2.new(actualLeft, actualTop)
-        obj.Fill.Size = Vector2.new(actualBoxW, actualBottom - actualTop)
+        obj.Fill.Position = Vector2.new(left, top)
+        obj.Fill.Size = Vector2.new(boxW, bottom - top)
         
         local fillColor = color
         if Window.Flags["ESP/BoxFillColor"] then
