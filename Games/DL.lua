@@ -368,13 +368,17 @@ local function IsChecking(model)
 end
 
 local function CheckWallBetween(from, to)
+    if not LocalPlayer.Character then return false end
+    
     local raycastParams = RaycastParams.new()
     raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
     raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
     
     local direction = (to - from)
     local distance = direction.Magnitude
-    local ray = Workspace:Raycast(from, direction)
+    if distance < 0.1 then return true end
+    
+    local ray = Workspace:Raycast(from, direction, raycastParams)
     
     if not ray then return true end
     
@@ -1085,20 +1089,13 @@ local function ProcessAimbot(cam, screenCenter)
         return 
     end
     
-    if not cam or not LocalPlayer.Character or not GetLocalRoot() then
+    if not cam then
         PredictionDot.Visible = false
         return
     end
     
     local mousePos = UserInputService:GetMouseLocation()
     local isHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
-    
-    local cameraFOV = Window.Flags["AIM/CameraFOV"] or 70
-    if cam and cam.FieldOfView ~= cameraFOV then
-        pcall(function()
-            cam.FieldOfView = cameraFOV
-        end)
-    end
     
     FOVCircle.Position = mousePos
     FOVCircle.Radius = Window.Flags["AIM/FOV"] or 180
@@ -1234,6 +1231,15 @@ local function MainLoop()
     local cam = Workspace.CurrentCamera
     if not cam then return end
     
+    if LocalPlayer.Character and GetLocalRoot() then
+        local cameraFOV = Window.Flags["AIM/CameraFOV"] or 70
+        if cam.FieldOfView ~= cameraFOV then
+            pcall(function()
+                cam.FieldOfView = cameraFOV
+            end)
+        end
+    end
+    
     local screenSize = cam.ViewportSize
     local screenCenter = Vector2.new(screenSize.X / 2, screenSize.Y / 2)
     
@@ -1287,8 +1293,10 @@ local function MainLoop()
         local closestDist = math.huge
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
-            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
-            if Window.Flags["ESP/TeamCheck"] and IsChecking(model) then continue end
+            if Window.Flags["ESP/TeamCheck"] then
+                if IsFriendly(model) then continue end
+                if IsChecking(model) then continue end
+            end
             local root = GetRoot(model)
             if root then
                 local dist = (root.Position - myPos).Magnitude
@@ -1582,16 +1590,23 @@ local function Initialize()
                 return configs
             end
             
+            local ConfigNameInput = ConfigSection:Textbox({Name = "Config Name", Flag = "Config/Name", Placeholder = "Enter config name", Value = ""})
             local ConfigDropdown = ConfigSection:Dropdown({Name = "Config", Flag = "Config/Selected", List = UpdateConfigList()})
             
             ConfigSection:Button({Name = "Save", Callback = function()
-                local selected = Window.Flags["Config/Selected"]
-                if selected and selected[1] then
-                    Window:SaveConfig(FolderName, selected[1])
+                local configName = Window.Flags["Config/Name"]
+                if configName and configName ~= "" then
+                    Window:SaveConfig(FolderName, configName)
+                    ConfigDropdown:SetList(UpdateConfigList())
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "Config saved: " .. configName,
+                        Duration = 3
+                    })
                 else
                     Parvus.Utilities.UI:Push({
                         Title = "Config System",
-                        Description = "Select Config First",
+                        Description = "Enter config name first",
                         Duration = 3
                     })
                 end
