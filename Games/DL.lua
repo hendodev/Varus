@@ -105,6 +105,11 @@ local function GetTorso(model)
     return model:FindFirstChild("torso")
 end
 
+local function GetHumanoid(model)
+    -- Try to find humanoid in the model
+    return model:FindFirstChildOfClass("Humanoid") or model:FindFirstChild("Humanoid")
+end
+
 local function GetLocalRoot()
     local char = LocalPlayer.Character
     if not char then return nil end
@@ -289,29 +294,80 @@ end
 
 local function GetPlayerStatus(model)
     local Window = getgenv().Window
-    if not Window or not Window.Flags["ESP/TeamCheck"] then
+    if not Window then
         return "neutral", Palette.Enemy
     end
     
+    -- Get color from flags if available
+    local enemyColor = Palette.Enemy
+    local friendlyColor = Palette.Friendly
+    local checkingColor = Palette.Checking
+    
+    if Window.Flags["ESP/EnemyColor"] then
+        local colorData = Window.Flags["ESP/EnemyColor"]
+        if type(colorData) == "table" and colorData[6] then
+            enemyColor = colorData[6]
+        elseif typeof(colorData) == "Color3" then
+            enemyColor = colorData
+        end
+    end
+    
+    if Window.Flags["ESP/FriendlyColor"] then
+        local colorData = Window.Flags["ESP/FriendlyColor"]
+        if type(colorData) == "table" and colorData[6] then
+            friendlyColor = colorData[6]
+        elseif typeof(colorData) == "Color3" then
+            friendlyColor = colorData
+        end
+    end
+    
+    if Window.Flags["ESP/CheckingColor"] then
+        local colorData = Window.Flags["ESP/CheckingColor"]
+        if type(colorData) == "table" and colorData[6] then
+            checkingColor = colorData[6]
+        elseif typeof(colorData) == "Color3" then
+            checkingColor = colorData
+        end
+    end
+    
+    if not Window.Flags["ESP/TeamCheck"] then
+        return "neutral", enemyColor
+    end
+    
     if Cache.ConfirmedEnemies[model] then
-        return "enemy", Palette.Enemy
+        return "enemy", enemyColor
     end
     
     if Cache.Friendlies[model] == true then
-        return "friendly", Palette.Friendly
+        return "friendly", friendlyColor
     end
     
-    return "checking", Palette.Checking
+    return "checking", checkingColor
 end
 
 local function CreateESPObject()
     local obj = {
         Box = {},
         Corners = {},
+        Box3D = {
+            TopLeft = Drawing.new("Line"),
+            TopRight = Drawing.new("Line"),
+            BottomLeft = Drawing.new("Line"),
+            BottomRight = Drawing.new("Line"),
+            Left = Drawing.new("Line"),
+            Right = Drawing.new("Line"),
+            Top = Drawing.new("Line"),
+            Bottom = Drawing.new("Line")
+        },
         Name = Drawing.new("Text"),
         Distance = Drawing.new("Text"),
         Tracer = Drawing.new("Line"),
-        Fill = Drawing.new("Square")
+        Fill = Drawing.new("Square"),
+        HealthBar = {
+            Outline = Drawing.new("Square"),
+            Fill = Drawing.new("Square"),
+            Text = Drawing.new("Text")
+        }
     }
     
     for i = 1, 4 do
@@ -324,6 +380,12 @@ local function CreateESPObject()
         obj.Corners[i] = Drawing.new("Line")
         obj.Corners[i].Thickness = Tuning.BoxThickness
         obj.Corners[i].Visible = false
+    end
+    
+    -- Setup 3D box lines
+    for _, line in pairs(obj.Box3D) do
+        line.Thickness = Tuning.BoxThickness
+        line.Visible = false
     end
     
     obj.Name.Size = Tuning.NameSize
@@ -346,6 +408,17 @@ local function CreateESPObject()
     obj.Fill.Transparency = 0.15
     obj.Fill.Visible = false
     
+    -- Setup health bar
+    obj.HealthBar.Outline.Filled = false
+    obj.HealthBar.Outline.Thickness = 1
+    obj.HealthBar.Outline.Visible = false
+    obj.HealthBar.Fill.Filled = true
+    obj.HealthBar.Fill.Visible = false
+    obj.HealthBar.Text.Size = 12
+    obj.HealthBar.Text.Font = Drawing.Fonts.Plex
+    obj.HealthBar.Text.Outline = true
+    obj.HealthBar.Text.Visible = false
+    
     return obj
 end
 
@@ -357,10 +430,20 @@ local function HideESP(obj)
     for i = 1, 8 do
         if obj.Corners[i] then obj.Corners[i].Visible = false end
     end
+    if obj.Box3D then
+        for _, line in pairs(obj.Box3D) do
+            if line then line.Visible = false end
+        end
+    end
     if obj.Name then obj.Name.Visible = false end
     if obj.Distance then obj.Distance.Visible = false end
     if obj.Tracer then obj.Tracer.Visible = false end
     if obj.Fill then obj.Fill.Visible = false end
+    if obj.HealthBar then
+        if obj.HealthBar.Outline then obj.HealthBar.Outline.Visible = false end
+        if obj.HealthBar.Fill then obj.HealthBar.Fill.Visible = false end
+        if obj.HealthBar.Text then obj.HealthBar.Text.Visible = false end
+    end
 end
 
 local function DestroyESP(obj)
@@ -372,10 +455,20 @@ local function DestroyESP(obj)
         for i = 1, 8 do
             if obj.Corners[i] then obj.Corners[i]:Remove() end
         end
+        if obj.Box3D then
+            for _, line in pairs(obj.Box3D) do
+                if line then line:Remove() end
+            end
+        end
         if obj.Name then obj.Name:Remove() end
         if obj.Distance then obj.Distance:Remove() end
         if obj.Tracer then obj.Tracer:Remove() end
         if obj.Fill then obj.Fill:Remove() end
+        if obj.HealthBar then
+            if obj.HealthBar.Outline then obj.HealthBar.Outline:Remove() end
+            if obj.HealthBar.Fill then obj.HealthBar.Fill:Remove() end
+            if obj.HealthBar.Text then obj.HealthBar.Text:Remove() end
+        end
     end)
 end
 
@@ -435,15 +528,158 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
     
     if Window.Flags["ESP/Box"] then
         local boxStyleValue = Window.Flags["ESP/BoxStyle"]
-        local boxStyle = 1
+        local boxStyle = "Full"
         if type(boxStyleValue) == "table" and #boxStyleValue > 0 then
-            if boxStyleValue[1] == "Corner" then
-                boxStyle = 2
+            boxStyle = boxStyleValue[1]
+        end
+        
+        -- Hide all box types first
+        for i = 1, 4 do obj.Box[i].Visible = false end
+        for i = 1, 8 do obj.Corners[i].Visible = false end
+        if obj.Box3D then
+            for _, line in pairs(obj.Box3D) do
+                line.Visible = false
             end
         end
-        if boxStyle == 1 then
-            for i = 1, 8 do obj.Corners[i].Visible = false end
+        
+        if boxStyle == "ThreeD" then
+            -- 3D Box ESP
+            local rootCF = root.CFrame
+            local size = Vector3.new(boxW, boxH, boxW * 0.5)
             
+            local front = {
+                TL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, -size.Z/2)).Position),
+                TR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, -size.Z/2)).Position),
+                BL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2)).Position),
+                BR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, -size.Z/2)).Position)
+            }
+            
+            local back = {
+                TL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, size.Z/2)).Position),
+                TR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, size.Z/2)).Position),
+                BL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, size.Z/2)).Position),
+                BR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, size.Z/2)).Position)
+            }
+            
+            if not (front.TL.Z > 0 and front.TR.Z > 0 and front.BL.Z > 0 and front.BR.Z > 0 and
+                   back.TL.Z > 0 and back.TR.Z > 0 and back.BL.Z > 0 and back.BR.Z > 0) then
+                return
+            end
+            
+            local function toVector2(v3) return Vector2.new(v3.X, v3.Y) end
+            front.TL, front.TR = toVector2(front.TL), toVector2(front.TR)
+            front.BL, front.BR = toVector2(front.BL), toVector2(front.BR)
+            back.TL, back.TR = toVector2(back.TL), toVector2(back.TR)
+            back.BL, back.BR = toVector2(back.BL), toVector2(back.BR)
+            
+            -- Front face
+            obj.Box3D.TopLeft.From = front.TL
+            obj.Box3D.TopLeft.To = front.TR
+            obj.Box3D.TopLeft.Color = color
+            obj.Box3D.TopLeft.Visible = true
+            
+            obj.Box3D.TopRight.From = front.TR
+            obj.Box3D.TopRight.To = front.BR
+            obj.Box3D.TopRight.Color = color
+            obj.Box3D.TopRight.Visible = true
+            
+            obj.Box3D.BottomLeft.From = front.BL
+            obj.Box3D.BottomLeft.To = front.BR
+            obj.Box3D.BottomLeft.Color = color
+            obj.Box3D.BottomLeft.Visible = true
+            
+            obj.Box3D.BottomRight.From = front.TL
+            obj.Box3D.BottomRight.To = front.BL
+            obj.Box3D.BottomRight.Color = color
+            obj.Box3D.BottomRight.Visible = true
+            
+            -- Back face
+            obj.Box3D.Left.From = back.TL
+            obj.Box3D.Left.To = back.TR
+            obj.Box3D.Left.Color = color
+            obj.Box3D.Left.Visible = true
+            
+            obj.Box3D.Right.From = back.TR
+            obj.Box3D.Right.To = back.BR
+            obj.Box3D.Right.Color = color
+            obj.Box3D.Right.Visible = true
+            
+            obj.Box3D.Top.From = back.BL
+            obj.Box3D.Top.To = back.BR
+            obj.Box3D.Top.Color = color
+            obj.Box3D.Top.Visible = true
+            
+            obj.Box3D.Bottom.From = back.TL
+            obj.Box3D.Bottom.To = back.BL
+            obj.Box3D.Bottom.Color = color
+            obj.Box3D.Bottom.Visible = true
+            
+            -- Connecting lines (front to back)
+            local connectors = {
+                {From = front.TL, To = back.TL},
+                {From = front.TR, To = back.TR},
+                {From = front.BL, To = back.BL},
+                {From = front.BR, To = back.BR}
+            }
+            
+            -- Use existing box lines for connectors temporarily
+            for i = 1, 4 do
+                if connectors[i] then
+                    obj.Box[i].From = connectors[i].From
+                    obj.Box[i].To = connectors[i].To
+                    obj.Box[i].Color = color
+                    obj.Box[i].Visible = true
+                end
+            end
+            
+        elseif boxStyle == "Corner" then
+            -- Corner Box ESP
+            local boxPosition = Vector2.new(left, top)
+            local boxSize = Vector2.new(boxW, boxH)
+            local cornerSize = boxW * 0.2
+            
+            obj.Corners[1].From = boxPosition
+            obj.Corners[1].To = boxPosition + Vector2.new(cornerSize, 0)
+            obj.Corners[1].Color = color
+            obj.Corners[1].Visible = true
+            
+            obj.Corners[2].From = boxPosition
+            obj.Corners[2].To = boxPosition + Vector2.new(0, cornerSize)
+            obj.Corners[2].Color = color
+            obj.Corners[2].Visible = true
+            
+            obj.Corners[3].From = boxPosition + Vector2.new(boxSize.X, 0)
+            obj.Corners[3].To = boxPosition + Vector2.new(boxSize.X - cornerSize, 0)
+            obj.Corners[3].Color = color
+            obj.Corners[3].Visible = true
+            
+            obj.Corners[4].From = boxPosition + Vector2.new(boxSize.X, 0)
+            obj.Corners[4].To = boxPosition + Vector2.new(boxSize.X, cornerSize)
+            obj.Corners[4].Color = color
+            obj.Corners[4].Visible = true
+            
+            obj.Corners[5].From = boxPosition + Vector2.new(0, boxSize.Y)
+            obj.Corners[5].To = boxPosition + Vector2.new(cornerSize, boxSize.Y)
+            obj.Corners[5].Color = color
+            obj.Corners[5].Visible = true
+            
+            obj.Corners[6].From = boxPosition + Vector2.new(0, boxSize.Y)
+            obj.Corners[6].To = boxPosition + Vector2.new(0, boxSize.Y - cornerSize)
+            obj.Corners[6].Color = color
+            obj.Corners[6].Visible = true
+            
+            obj.Corners[7].From = boxPosition + Vector2.new(boxSize.X, boxSize.Y)
+            obj.Corners[7].To = boxPosition + Vector2.new(boxSize.X - cornerSize, boxSize.Y)
+            obj.Corners[7].Color = color
+            obj.Corners[7].Visible = true
+            
+            obj.Corners[8].From = boxPosition + Vector2.new(boxSize.X, boxSize.Y)
+            obj.Corners[8].To = boxPosition + Vector2.new(boxSize.X, boxSize.Y - cornerSize)
+            obj.Corners[8].Color = color
+            obj.Corners[8].Visible = true
+            
+        else
+            -- Full Box ESP (default)
             obj.Box[1].From = Vector2.new(left, top)
             obj.Box[1].To = Vector2.new(right, top)
             obj.Box[2].From = Vector2.new(right, top)
@@ -457,39 +693,15 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
                 obj.Box[i].Color = color
                 obj.Box[i].Visible = true
             end
-        else
-            for i = 1, 4 do obj.Box[i].Visible = false end
-            
-            local cl = Tuning.CornerLength
-            
-            obj.Corners[1].From = Vector2.new(left, top)
-            obj.Corners[1].To = Vector2.new(left + cl, top)
-            obj.Corners[2].From = Vector2.new(left, top)
-            obj.Corners[2].To = Vector2.new(left, top + cl)
-            
-            obj.Corners[3].From = Vector2.new(right, top)
-            obj.Corners[3].To = Vector2.new(right - cl, top)
-            obj.Corners[4].From = Vector2.new(right, top)
-            obj.Corners[4].To = Vector2.new(right, top + cl)
-            
-            obj.Corners[5].From = Vector2.new(left, bottom)
-            obj.Corners[5].To = Vector2.new(left + cl, bottom)
-            obj.Corners[6].From = Vector2.new(left, bottom)
-            obj.Corners[6].To = Vector2.new(left, bottom - cl)
-            
-            obj.Corners[7].From = Vector2.new(right, bottom)
-            obj.Corners[7].To = Vector2.new(right - cl, bottom)
-            obj.Corners[8].From = Vector2.new(right, bottom)
-            obj.Corners[8].To = Vector2.new(right, bottom - cl)
-            
-            for i = 1, 8 do
-                obj.Corners[i].Color = color
-                obj.Corners[i].Visible = true
-            end
         end
     else
         for i = 1, 4 do obj.Box[i].Visible = false end
         for i = 1, 8 do obj.Corners[i].Visible = false end
+        if obj.Box3D then
+            for _, line in pairs(obj.Box3D) do
+                line.Visible = false
+            end
+        end
     end
     
     if Window.Flags["ESP/BoxFill"] then
@@ -501,11 +713,15 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         obj.Fill.Visible = false
     end
     
-    if Window.Flags["ESP/Name"] and Window.Flags["ESP/TeamCheck"] then
-        if status == "friendly" then
-            obj.Name.Text = "FRIENDLY"
-        elseif status == "checking" then
-            obj.Name.Text = "CHECKING"
+    if Window.Flags["ESP/Name"] then
+        if Window.Flags["ESP/TeamCheck"] then
+            if status == "friendly" then
+                obj.Name.Text = "FRIENDLY"
+            elseif status == "checking" then
+                obj.Name.Text = "CHECKING"
+            else
+                obj.Name.Text = "ENEMY"
+            end
         else
             obj.Name.Text = "ENEMY"
         end
@@ -544,10 +760,64 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         end
         obj.Tracer.From = origin
         obj.Tracer.To = Vector2.new(cx, bottom)
-        obj.Tracer.Color = Palette.Tracer
+        local tracerColor = Palette.Tracer
+        if Window.Flags["ESP/TracerColor"] then
+            local colorData = Window.Flags["ESP/TracerColor"]
+            if type(colorData) == "table" and colorData[6] then
+                tracerColor = colorData[6]
+            elseif typeof(colorData) == "Color3" then
+                tracerColor = colorData
+            end
+        end
+        obj.Tracer.Color = tracerColor
         obj.Tracer.Visible = true
     else
         obj.Tracer.Visible = false
+    end
+    
+    -- Health Bar ESP
+    if Window.Flags["ESP/HealthBar"] then
+        local humanoid = GetHumanoid(model)
+        if humanoid then
+            local health = humanoid.Health
+            local maxHealth = humanoid.MaxHealth
+            local healthPercent = math.clamp(health / maxHealth, 0, 1)
+            
+            local barHeight = boxH * 0.8
+            local barWidth = 4
+            local barPos = Vector2.new(
+                left - barWidth - 2,
+                top + (boxH - barHeight) / 2
+            )
+            
+            obj.HealthBar.Outline.Size = Vector2.new(barWidth, barHeight)
+            obj.HealthBar.Outline.Position = barPos
+            obj.HealthBar.Outline.Color = color
+            obj.HealthBar.Outline.Visible = true
+            
+            local fillHeight = barHeight * healthPercent
+            obj.HealthBar.Fill.Size = Vector2.new(barWidth - 2, fillHeight)
+            obj.HealthBar.Fill.Position = Vector2.new(barPos.X + 1, barPos.Y + barHeight * (1 - healthPercent))
+            obj.HealthBar.Fill.Color = Color3.fromRGB(255 - (255 * healthPercent), 255 * healthPercent, 0)
+            obj.HealthBar.Fill.Visible = true
+            
+            if Window.Flags["ESP/HealthText"] then
+                obj.HealthBar.Text.Text = math.floor(health) .. "/" .. math.floor(maxHealth)
+                obj.HealthBar.Text.Position = Vector2.new(barPos.X + barWidth + 2, barPos.Y + barHeight / 2)
+                obj.HealthBar.Text.Color = color
+                obj.HealthBar.Text.Visible = true
+            else
+                obj.HealthBar.Text.Visible = false
+            end
+        else
+            obj.HealthBar.Outline.Visible = false
+            obj.HealthBar.Fill.Visible = false
+            obj.HealthBar.Text.Visible = false
+        end
+    else
+        obj.HealthBar.Outline.Visible = false
+        obj.HealthBar.Fill.Visible = false
+        obj.HealthBar.Text.Visible = false
     end
 end
 
@@ -827,7 +1097,14 @@ local function MainLoop()
         
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
-            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
+            
+            -- Fix teamcheck: Only skip if confirmed friendly, not checking
+            if Window.Flags["ESP/TeamCheck"] then
+                if Cache.Friendlies[model] == true then
+                    continue -- Skip confirmed friendlies
+                end
+                -- Show enemies and checking status
+            end
             
             local root = GetRoot(model)
             if not root then continue end
@@ -1001,11 +1278,14 @@ local function Initialize()
             ESPSettingsSection:Toggle({Name = "Box ESP", Flag = "ESP/Box", Value = true})
             ESPSettingsSection:Dropdown({Name = "Box Style", Flag = "ESP/BoxStyle", List = {
                 {Name = "Full", Mode = "Button", Value = true},
-                {Name = "Corner", Mode = "Button"}
+                {Name = "Corner", Mode = "Button"},
+                {Name = "ThreeD", Mode = "Button"}
             }})
             ESPSettingsSection:Toggle({Name = "Box Fill", Flag = "ESP/BoxFill", Value = false})
             ESPSettingsSection:Toggle({Name = "Name", Flag = "ESP/Name", Value = true})
             ESPSettingsSection:Toggle({Name = "Distance", Flag = "ESP/Distance", Value = true})
+            ESPSettingsSection:Toggle({Name = "Health Bar", Flag = "ESP/HealthBar", Value = false})
+            ESPSettingsSection:Toggle({Name = "Health Text", Flag = "ESP/HealthText", Value = true})
             ESPSettingsSection:Slider({Name = "Max Distance", Flag = "ESP/MaxDistance", Min = 500, Max = 3000, Value = 500, Step = 50})
             ESPSettingsSection:Toggle({Name = "Tracer", Flag = "ESP/Tracer", Value = false})
             ESPSettingsSection:Dropdown({Name = "Tracer Origin", Flag = "ESP/TracerOrigin", List = {
@@ -1014,6 +1294,13 @@ local function Initialize()
                 {Name = "Top", Mode = "Button"}
             }})
             ESPSettingsSection:Toggle({Name = "Team Check", Flag = "ESP/TeamCheck", Value = true})
+        end
+        
+        local ColorSection = ESPTab:Section({Name = "Colors", Side = "Left"}) do
+            ColorSection:Colorpicker({Name = "Enemy Color", Flag = "ESP/EnemyColor", Value = {1, 0.294, 0.333, 0, false}})
+            ColorSection:Colorpicker({Name = "Friendly Color", Flag = "ESP/FriendlyColor", Value = {0.314, 0.706, 1, 0, false}})
+            ColorSection:Colorpicker({Name = "Checking Color", Flag = "ESP/CheckingColor", Value = {0.588, 0.588, 0.588, 0, false}})
+            ColorSection:Colorpicker({Name = "Tracer Color", Flag = "ESP/TracerColor", Value = {1, 0.549, 0.392, 0, false}})
         end
         
         local ChamsSection = ESPTab:Section({Name = "Chams", Side = "Right"}) do
@@ -1039,6 +1326,20 @@ local function Initialize()
                 {Name = "Root", Mode = "Button"}
             }})
             AimbotSection:Toggle({Name = "Team Check", Flag = "AIM/TeamCheck", Value = true})
+        end
+    end
+    
+    -- Options Tab
+    local OptionsTab = Window:Tab({Name = "Options"}) do
+        local MenuSection = OptionsTab:Section({Name = "Menu", Side = "Left"}) do
+            local UIToggle = MenuSection:Toggle({Name = "UI Enabled", Flag = "UI/Enabled", IgnoreFlag = true,
+            Value = Window.Enabled, Callback = function(Bool) Window.Enabled = Bool end})
+            UIToggle:Keybind({Value = "Insert", Flag = "UI/Keybind", IgnoreList = true, DoNotClear = true,
+            Callback = function(Key, KeyDown)
+                if KeyDown then
+                    Window.Enabled = not Window.Enabled
+                end
+            end})
         end
     end
     
