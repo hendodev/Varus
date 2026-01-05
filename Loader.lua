@@ -57,7 +57,8 @@ getgenv().Parvus = {
         ["187796008" ] = { Name = "Those Who Remain",           Script = "Games/TWR"  },
         ["358276974" ] = { Name = "Apocalypse Rising 2",        Script = "Games/AR2"  },
         ["3495983524"] = { Name = "Apocalypse Rising 2 Dev.",   Script = "Games/AR2"  },
-        ["1054526971"] = { Name = "Blackhawk Rescue Mission 5", Script = "Games/BRM5" }
+        ["1054526971"] = { Name = "Blackhawk Rescue Mission 5", Script = "Games/BRM5" },
+        ["12144402492"] = { Name = "Deadline",                  Script = "Games/DL"   }
     }
 }
 
