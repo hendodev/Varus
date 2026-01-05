@@ -783,18 +783,29 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
             obj.Corners[8].Visible = true
             
         else
-            obj.Box[1].From = Vector2.new(actualLeft, actualTop)
-            obj.Box[1].To = Vector2.new(actualRight, actualTop)
-            obj.Box[2].From = Vector2.new(actualRight, actualTop)
-            obj.Box[2].To = Vector2.new(actualRight, actualBottom)
-            obj.Box[3].From = Vector2.new(actualRight, actualBottom)
-            obj.Box[3].To = Vector2.new(actualLeft, actualBottom)
-            obj.Box[4].From = Vector2.new(actualLeft, actualBottom)
-            obj.Box[4].To = Vector2.new(actualLeft, actualTop)
-            
-            for i = 1, 4 do
-                obj.Box[i].Color = color
-                obj.Box[i].Visible = true
+            if obj.Box[1] then
+                obj.Box[1].From = Vector2.new(actualLeft, actualTop)
+                obj.Box[1].To = Vector2.new(actualRight, actualTop)
+                obj.Box[1].Color = color
+                obj.Box[1].Visible = true
+            end
+            if obj.Box[2] then
+                obj.Box[2].From = Vector2.new(actualRight, actualTop)
+                obj.Box[2].To = Vector2.new(actualRight, actualBottom)
+                obj.Box[2].Color = color
+                obj.Box[2].Visible = true
+            end
+            if obj.Box[3] then
+                obj.Box[3].From = Vector2.new(actualRight, actualBottom)
+                obj.Box[3].To = Vector2.new(actualLeft, actualBottom)
+                obj.Box[3].Color = color
+                obj.Box[3].Visible = true
+            end
+            if obj.Box[4] then
+                obj.Box[4].From = Vector2.new(actualLeft, actualBottom)
+                obj.Box[4].To = Vector2.new(actualLeft, actualTop)
+                obj.Box[4].Color = color
+                obj.Box[4].Visible = true
             end
         end
     else
@@ -1340,6 +1351,9 @@ local function MainLoop()
             ScanFriendlyIndicators()
             UpdateFriendlyStatus()
         else
+            for model in pairs(Cache.Soldiers) do
+                Cache.Friendlies[model] = nil
+            end
             DetectTeammates()
         end
     end
@@ -1370,7 +1384,7 @@ local function MainLoop()
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
-            if Cache.Friendlies[model] == true then
+            if Window.Flags["ESP/TeamCheck"] and Cache.Friendlies[model] == true then
                 continue
             end
             
