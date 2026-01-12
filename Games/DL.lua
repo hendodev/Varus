@@ -457,7 +457,11 @@ local function CreateESPObject()
             Left = Drawing.new("Line"),
             Right = Drawing.new("Line"),
             Top = Drawing.new("Line"),
-            Bottom = Drawing.new("Line")
+            Bottom = Drawing.new("Line"),
+            ConnectTL = Drawing.new("Line"),
+            ConnectTR = Drawing.new("Line"),
+            ConnectBL = Drawing.new("Line"),
+            ConnectBR = Drawing.new("Line")
         },
         Name = Drawing.new("Text"),
         Distance = Drawing.new("Text"),
@@ -656,75 +660,109 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         if boxStyle == "ThreeD" then
             for i = 1, 4 do obj.Box[i].Visible = false end
             for i = 1, 8 do obj.Corners[i].Visible = false end
-            local root = GetRoot(model)
-            local head = GetHead(model)
-            if root and head then
-                local rootPos = root.Position
-                local headPos = head.Position
-                local height = (headPos.Y - rootPos.Y) * 1.5
+            local headPart = GetHead(model)
+            if root and headPart then
+                local rootCFrame = root.CFrame
+                local headPos = headPart.Position
+                -- Calculate dimensions based on character parts
+                local height = math.abs(headPos.Y - rootPos.Y) * 1.3
                 local width = 2
-                local depth = 1
-                local corners = {
-                    Vector3.new(rootPos.X - width/2, rootPos.Y + height, rootPos.Z - depth/2),
-                    Vector3.new(rootPos.X + width/2, rootPos.Y + height, rootPos.Z - depth/2),
-                    Vector3.new(rootPos.X + width/2, rootPos.Y + height, rootPos.Z + depth/2),
-                    Vector3.new(rootPos.X - width/2, rootPos.Y + height, rootPos.Z + depth/2),
-                    Vector3.new(rootPos.X - width/2, rootPos.Y, rootPos.Z - depth/2),
-                    Vector3.new(rootPos.X + width/2, rootPos.Y, rootPos.Z - depth/2),
-                    Vector3.new(rootPos.X + width/2, rootPos.Y, rootPos.Z + depth/2),
-                    Vector3.new(rootPos.X - width/2, rootPos.Y, rootPos.Z + depth/2)
+                local depth = 1.5
+                -- Create 8 corners of the 3D box
+                local corners3D = {
+                    rootCFrame * CFrame.new(-width/2, height, -depth/2),
+                    rootCFrame * CFrame.new(width/2, height, -depth/2),
+                    rootCFrame * CFrame.new(width/2, height, depth/2),
+                    rootCFrame * CFrame.new(-width/2, height, depth/2),
+                    rootCFrame * CFrame.new(-width/2, 0, -depth/2),
+                    rootCFrame * CFrame.new(width/2, 0, -depth/2),
+                    rootCFrame * CFrame.new(width/2, 0, depth/2),
+                    rootCFrame * CFrame.new(-width/2, 0, depth/2)
                 }
+                -- Convert to screen space
                 local screenCorners = {}
                 local allVisible = true
-                for i, corner in ipairs(corners) do
-                    local screenPos, onScreen = cam:WorldToViewportPoint(corner)
-                    if onScreen and screenPos.Z > 0 then
-                        screenCorners[i] = Vector2.new(screenPos.X, screenPos.Y)
+                for i = 1, 8 do
+                    local pos, visible = cam:WorldToViewportPoint(corners3D[i].Position)
+                    if visible and pos.Z > 0 then
+                        screenCorners[i] = Vector2.new(pos.X, pos.Y)
                     else
                         allVisible = false
                         break
                     end
                 end
                 if allVisible then
-                    local lines = {
-                        {screenCorners[1], screenCorners[2]},
-                        {screenCorners[2], screenCorners[3]},
-                        {screenCorners[3], screenCorners[4]},
-                        {screenCorners[4], screenCorners[1]},
-                        {screenCorners[5], screenCorners[6]},
-                        {screenCorners[6], screenCorners[7]},
-                        {screenCorners[7], screenCorners[8]},
-                        {screenCorners[8], screenCorners[5]},
-                        {screenCorners[1], screenCorners[5]},
-                        {screenCorners[2], screenCorners[6]},
-                        {screenCorners[3], screenCorners[7]},
-                        {screenCorners[4], screenCorners[8]}
-                    }
-                    local box3d = obj.Box3D
-                    for i = 1, 12 do
-                        if box3d[i] then
-                            if i <= #lines then
-                                box3d[i].From = lines[i][1]
-                                box3d[i].To = lines[i][2]
-                                box3d[i].Color = color
-                                box3d[i].Visible = true
-                            else
-                                box3d[i].Visible = false
-                            end
-                        end
-                    end
+                    -- Top face (1-2-3-4)
+                    obj.Box3D.TopLeft.From = screenCorners[1]
+                    obj.Box3D.TopLeft.To = screenCorners[2]
+                    obj.Box3D.TopLeft.Color = color
+                    obj.Box3D.TopLeft.Visible = true
+
+                    obj.Box3D.TopRight.From = screenCorners[2]
+                    obj.Box3D.TopRight.To = screenCorners[3]
+                    obj.Box3D.TopRight.Color = color
+                    obj.Box3D.TopRight.Visible = true
+
+                    obj.Box3D.Top.From = screenCorners[3]
+                    obj.Box3D.Top.To = screenCorners[4]
+                    obj.Box3D.Top.Color = color
+                    obj.Box3D.Top.Visible = true
+
+                    obj.Box3D.Left.From = screenCorners[4]
+                    obj.Box3D.Left.To = screenCorners[1]
+                    obj.Box3D.Left.Color = color
+                    obj.Box3D.Left.Visible = true
+
+                    -- Bottom face (5-6-7-8)
+                    obj.Box3D.BottomLeft.From = screenCorners[5]
+                    obj.Box3D.BottomLeft.To = screenCorners[6]
+                    obj.Box3D.BottomLeft.Color = color
+                    obj.Box3D.BottomLeft.Visible = true
+
+                    obj.Box3D.BottomRight.From = screenCorners[6]
+                    obj.Box3D.BottomRight.To = screenCorners[7]
+                    obj.Box3D.BottomRight.Color = color
+                    obj.Box3D.BottomRight.Visible = true
+
+                    obj.Box3D.Bottom.From = screenCorners[7]
+                    obj.Box3D.Bottom.To = screenCorners[8]
+                    obj.Box3D.Bottom.Color = color
+                    obj.Box3D.Bottom.Visible = true
+
+                    obj.Box3D.Right.From = screenCorners[8]
+                    obj.Box3D.Right.To = screenCorners[5]
+                    obj.Box3D.Right.Color = color
+                    obj.Box3D.Right.Visible = true
+
+                    -- Vertical connecting lines (1-5, 2-6, 3-7, 4-8)
+                    obj.Box3D.ConnectTL.From = screenCorners[1]
+                    obj.Box3D.ConnectTL.To = screenCorners[5]
+                    obj.Box3D.ConnectTL.Color = color
+                    obj.Box3D.ConnectTL.Visible = true
+
+                    obj.Box3D.ConnectTR.From = screenCorners[2]
+                    obj.Box3D.ConnectTR.To = screenCorners[6]
+                    obj.Box3D.ConnectTR.Color = color
+                    obj.Box3D.ConnectTR.Visible = true
+
+                    obj.Box3D.ConnectBL.From = screenCorners[3]
+                    obj.Box3D.ConnectBL.To = screenCorners[7]
+                    obj.Box3D.ConnectBL.Color = color
+                    obj.Box3D.ConnectBL.Visible = true
+
+                    obj.Box3D.ConnectBR.From = screenCorners[4]
+                    obj.Box3D.ConnectBR.To = screenCorners[8]
+                    obj.Box3D.ConnectBR.Color = color
+                    obj.Box3D.ConnectBR.Visible = true
                 else
-                    for i = 1, 12 do
-                        if obj.Box3D[i] then
-                            obj.Box3D[i].Visible = false
-                        end
+                    -- Hide all if not visible
+                    for _, line in pairs(obj.Box3D) do
+                        line.Visible = false
                     end
                 end
             else
-                for i = 1, 12 do
-                    if obj.Box3D[i] then
-                        obj.Box3D[i].Visible = false
-                    end
+                for _, line in pairs(obj.Box3D) do
+                    line.Visible = false
                 end
             end
         elseif boxStyle == "Corner" then
@@ -734,27 +772,52 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
                     line.Visible = false
                 end
             end
-            local cl = Tuning.CornerLength
+            -- Use a percentage-based corner length that scales with box size
+            local cornerLength = math.min(boxW, boxH) * 0.25
+
+            -- Top-left corner
             obj.Corners[1].From = Vector2.new(left, top)
-            obj.Corners[1].To = Vector2.new(left + cl, top)
+            obj.Corners[1].To = Vector2.new(left + cornerLength, top)
+            obj.Corners[1].Color = color
+            obj.Corners[1].Visible = true
+
             obj.Corners[2].From = Vector2.new(left, top)
-            obj.Corners[2].To = Vector2.new(left, top + cl)
+            obj.Corners[2].To = Vector2.new(left, top + cornerLength)
+            obj.Corners[2].Color = color
+            obj.Corners[2].Visible = true
+
+            -- Top-right corner
             obj.Corners[3].From = Vector2.new(right, top)
-            obj.Corners[3].To = Vector2.new(right - cl, top)
+            obj.Corners[3].To = Vector2.new(right - cornerLength, top)
+            obj.Corners[3].Color = color
+            obj.Corners[3].Visible = true
+
             obj.Corners[4].From = Vector2.new(right, top)
-            obj.Corners[4].To = Vector2.new(right, top + cl)
+            obj.Corners[4].To = Vector2.new(right, top + cornerLength)
+            obj.Corners[4].Color = color
+            obj.Corners[4].Visible = true
+
+            -- Bottom-left corner
             obj.Corners[5].From = Vector2.new(left, bottom)
-            obj.Corners[5].To = Vector2.new(left + cl, bottom)
+            obj.Corners[5].To = Vector2.new(left + cornerLength, bottom)
+            obj.Corners[5].Color = color
+            obj.Corners[5].Visible = true
+
             obj.Corners[6].From = Vector2.new(left, bottom)
-            obj.Corners[6].To = Vector2.new(left, bottom - cl)
+            obj.Corners[6].To = Vector2.new(left, bottom - cornerLength)
+            obj.Corners[6].Color = color
+            obj.Corners[6].Visible = true
+
+            -- Bottom-right corner
             obj.Corners[7].From = Vector2.new(right, bottom)
-            obj.Corners[7].To = Vector2.new(right - cl, bottom)
+            obj.Corners[7].To = Vector2.new(right - cornerLength, bottom)
+            obj.Corners[7].Color = color
+            obj.Corners[7].Visible = true
+
             obj.Corners[8].From = Vector2.new(right, bottom)
-            obj.Corners[8].To = Vector2.new(right, bottom - cl)
-            for i = 1, 8 do
-                obj.Corners[i].Color = color
-                obj.Corners[i].Visible = true
-            end
+            obj.Corners[8].To = Vector2.new(right, bottom - cornerLength)
+            obj.Corners[8].Color = color
+            obj.Corners[8].Visible = true
         else
             for i = 1, 8 do obj.Corners[i].Visible = false end
             if obj.Box3D then
@@ -1137,15 +1200,16 @@ local function ProcessAimbot(cam, screenCenter)
     local isHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     
     local cameraFOV = Window.Flags["AIM/CameraFOV"] or 70
-    if cam and cam.FieldOfView ~= cameraFOV then
+    local cam = Workspace.CurrentCamera
+    if cam then
         pcall(function()
             cam.FieldOfView = cameraFOV
         end)
     end
-    
+
     FOVCircle.Position = mousePos
     FOVCircle.Radius = Window.Flags["AIM/FOV"] or 180
-    FOVCircle.Visible = Window.Flags["AIM/Enabled"] and Window.Flags["AIM/ShowFOV"]
+    FOVCircle.Visible = Window.Flags["AIM/Enabled"] and Window.Flags["AIM/ShowFOV"] or false
     
     local fovColor = Color3.fromRGB(255, 75, 85)
     if Window.Flags["AIM/FOVColor"] then
@@ -1312,9 +1376,41 @@ local function MainLoop()
         end
     end
     
-    -- Removed wallcheck and closest enemy logic
-    Cache.WallCheckResults = {}
-    Cache.ClosestEnemy = nil
+    -- Wall Check Logic
+    if Window.Flags["ESP/WallCheck"] then
+        local myPos = GetLocalPosition()
+        for model in pairs(Cache.Soldiers) do
+            if IsValidModel(model) then
+                local root = GetRoot(model)
+                if root then
+                    Cache.WallCheckResults[model] = CheckWallBetween(myPos, root.Position)
+                end
+            end
+        end
+    else
+        Cache.WallCheckResults = {}
+    end
+
+    -- Closest Enemy Logic
+    if Window.Flags["ESP/ClosestEnemy"] then
+        local myPos = GetLocalPosition()
+        local closestDist = math.huge
+        Cache.ClosestEnemy = nil
+        for model in pairs(Cache.Soldiers) do
+            if IsValidModel(model) and not IsFriendly(model) then
+                local root = GetRoot(model)
+                if root then
+                    local dist = (root.Position - myPos).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        Cache.ClosestEnemy = model
+                    end
+                end
+            end
+        end
+    else
+        Cache.ClosestEnemy = nil
+    end
     
     ResetPool()
     
@@ -1323,9 +1419,12 @@ local function MainLoop()
         local maxDistSq = (Window.Flags["ESP/MaxDistance"] or 500) * (Window.Flags["ESP/MaxDistance"] or 500)
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
-            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
-            -- Only show confirmed enemies if TeamCheck is on
-            if Window.Flags["ESP/TeamCheck"] and not Cache.ConfirmedEnemies[model] then continue end
+            -- STRENGTHENED: Skip if TeamCheck is on and model is friendly OR checking
+            if Window.Flags["ESP/TeamCheck"] then
+                if IsFriendly(model) or IsChecking(model) then
+                    continue
+                end
+            end
             local root = GetRoot(model)
             if not root then continue end
             local rootPos = root.Position
@@ -1713,3 +1812,4 @@ local function Initialize()
 end
 
 Initialize()
+
