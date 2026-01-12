@@ -653,13 +653,78 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         if type(boxStyleValue) == "table" and #boxStyleValue > 0 then
             boxStyle = boxStyleValue[1]
         end
-        
         if boxStyle == "ThreeD" then
             for i = 1, 4 do obj.Box[i].Visible = false end
             for i = 1, 8 do obj.Corners[i].Visible = false end
-            if obj.Box3D then
-                for _, line in pairs(obj.Box3D) do
-                    line.Visible = false
+            local root = GetRoot(model)
+            local head = GetHead(model)
+            if root and head then
+                local rootPos = root.Position
+                local headPos = head.Position
+                local height = (headPos.Y - rootPos.Y) * 1.5
+                local width = 2
+                local depth = 1
+                local corners = {
+                    Vector3.new(rootPos.X - width/2, rootPos.Y + height, rootPos.Z - depth/2),
+                    Vector3.new(rootPos.X + width/2, rootPos.Y + height, rootPos.Z - depth/2),
+                    Vector3.new(rootPos.X + width/2, rootPos.Y + height, rootPos.Z + depth/2),
+                    Vector3.new(rootPos.X - width/2, rootPos.Y + height, rootPos.Z + depth/2),
+                    Vector3.new(rootPos.X - width/2, rootPos.Y, rootPos.Z - depth/2),
+                    Vector3.new(rootPos.X + width/2, rootPos.Y, rootPos.Z - depth/2),
+                    Vector3.new(rootPos.X + width/2, rootPos.Y, rootPos.Z + depth/2),
+                    Vector3.new(rootPos.X - width/2, rootPos.Y, rootPos.Z + depth/2)
+                }
+                local screenCorners = {}
+                local allVisible = true
+                for i, corner in ipairs(corners) do
+                    local screenPos, onScreen = cam:WorldToViewportPoint(corner)
+                    if onScreen and screenPos.Z > 0 then
+                        screenCorners[i] = Vector2.new(screenPos.X, screenPos.Y)
+                    else
+                        allVisible = false
+                        break
+                    end
+                end
+                if allVisible then
+                    local lines = {
+                        {screenCorners[1], screenCorners[2]},
+                        {screenCorners[2], screenCorners[3]},
+                        {screenCorners[3], screenCorners[4]},
+                        {screenCorners[4], screenCorners[1]},
+                        {screenCorners[5], screenCorners[6]},
+                        {screenCorners[6], screenCorners[7]},
+                        {screenCorners[7], screenCorners[8]},
+                        {screenCorners[8], screenCorners[5]},
+                        {screenCorners[1], screenCorners[5]},
+                        {screenCorners[2], screenCorners[6]},
+                        {screenCorners[3], screenCorners[7]},
+                        {screenCorners[4], screenCorners[8]}
+                    }
+                    local box3d = obj.Box3D
+                    for i = 1, 12 do
+                        if box3d[i] then
+                            if i <= #lines then
+                                box3d[i].From = lines[i][1]
+                                box3d[i].To = lines[i][2]
+                                box3d[i].Color = color
+                                box3d[i].Visible = true
+                            else
+                                box3d[i].Visible = false
+                            end
+                        end
+                    end
+                else
+                    for i = 1, 12 do
+                        if obj.Box3D[i] then
+                            obj.Box3D[i].Visible = false
+                        end
+                    end
+                end
+            else
+                for i = 1, 12 do
+                    if obj.Box3D[i] then
+                        obj.Box3D[i].Visible = false
+                    end
                 end
             end
         elseif boxStyle == "Corner" then
@@ -669,29 +734,23 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
                     line.Visible = false
                 end
             end
-            
             local cl = Tuning.CornerLength
-            
             obj.Corners[1].From = Vector2.new(left, top)
             obj.Corners[1].To = Vector2.new(left + cl, top)
             obj.Corners[2].From = Vector2.new(left, top)
             obj.Corners[2].To = Vector2.new(left, top + cl)
-            
             obj.Corners[3].From = Vector2.new(right, top)
             obj.Corners[3].To = Vector2.new(right - cl, top)
             obj.Corners[4].From = Vector2.new(right, top)
             obj.Corners[4].To = Vector2.new(right, top + cl)
-            
             obj.Corners[5].From = Vector2.new(left, bottom)
             obj.Corners[5].To = Vector2.new(left + cl, bottom)
             obj.Corners[6].From = Vector2.new(left, bottom)
             obj.Corners[6].To = Vector2.new(left, bottom - cl)
-            
             obj.Corners[7].From = Vector2.new(right, bottom)
             obj.Corners[7].To = Vector2.new(right - cl, bottom)
             obj.Corners[8].From = Vector2.new(right, bottom)
             obj.Corners[8].To = Vector2.new(right, bottom - cl)
-            
             for i = 1, 8 do
                 obj.Corners[i].Color = color
                 obj.Corners[i].Visible = true
@@ -703,7 +762,6 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
                     line.Visible = false
                 end
             end
-            
             obj.Box[1].From = Vector2.new(left, top)
             obj.Box[1].To = Vector2.new(right, top)
             obj.Box[2].From = Vector2.new(right, top)
@@ -712,7 +770,6 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
             obj.Box[3].To = Vector2.new(left, bottom)
             obj.Box[4].From = Vector2.new(left, bottom)
             obj.Box[4].To = Vector2.new(left, top)
-            
             for i = 1, 4 do
                 obj.Box[i].Color = color
                 obj.Box[i].Visible = true
@@ -811,9 +868,17 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
     end
     
     if Window.Flags["ESP/Skeleton"] then
+        local skeletonColor = color
+        if Window.Flags["ESP/SkeletonColor"] then
+            local colorData = Window.Flags["ESP/SkeletonColor"]
+            if type(colorData) == "table" and colorData[6] then
+                skeletonColor = colorData[6]
+            elseif typeof(colorData) == "Color3" then
+                skeletonColor = colorData
+            end
+        end
         local function getBonePositions(model)
             if not model then return nil end
-            
             local skeletonParts = {
                 head = GetHead(model) or model:FindFirstChild("head"),
                 torso = GetTorso(model) or model:FindFirstChild("torso"),
@@ -822,63 +887,41 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
                 right_leg_vis = model:FindFirstChild("right_leg_vis") or model:FindFirstChild("Right Leg") or model:FindFirstChild("right_leg"),
                 left_leg_vis = model:FindFirstChild("left_leg_vis") or model:FindFirstChild("Left Leg") or model:FindFirstChild("left_leg")
             }
-            
             if not (skeletonParts.head and skeletonParts.torso) then return nil end
-            
             return skeletonParts
         end
-        
         local skeletonParts = getBonePositions(model)
         if skeletonParts then
             for _, line in pairs(obj.Skeleton) do
                 line.Visible = false
             end
-            
             local function drawBoneStable(from, to, line)
                 if not from or not to then 
                     line.Visible = false
                     return 
                 end
-                
                 local fromScreen, fromVisible = cam:WorldToViewportPoint(from.Position)
                 local toScreen, toVisible = cam:WorldToViewportPoint(to.Position)
-                
                 if not (fromVisible and toVisible) or fromScreen.Z < 0 or toScreen.Z < 0 then
                     line.Visible = false
                     return
                 end
-                
-                local screenBounds = cam.ViewportSize
-                if fromScreen.X < -100 or fromScreen.X > screenBounds.X + 100 or
-                   fromScreen.Y < -100 or fromScreen.Y > screenBounds.Y + 100 or
-                   toScreen.X < -100 or toScreen.X > screenBounds.X + 100 or
-                   toScreen.Y < -100 or toScreen.Y > screenBounds.Y + 100 then
-                    line.Visible = false
-                    return
-                end
-                
                 line.From = Vector2.new(fromScreen.X, fromScreen.Y)
                 line.To = Vector2.new(toScreen.X, toScreen.Y)
-                
-                line.Color = color
+                line.Color = skeletonColor
                 line.Thickness = Window.Flags["ESP/SkeletonThickness"] or 1.5
                 line.Visible = true
             end
-            
             drawBoneStable(skeletonParts.head, skeletonParts.torso, obj.Skeleton.Head)
-            
             if skeletonParts.right_arm_vis then
                 drawBoneStable(skeletonParts.torso, skeletonParts.right_arm_vis, obj.Skeleton.RightShoulder)
             end
-            
             if skeletonParts.left_arm_vis then
                 drawBoneStable(skeletonParts.torso, skeletonParts.left_arm_vis, obj.Skeleton.LeftShoulder)
             end
-            
             if skeletonParts.right_leg_vis then
                 drawBoneStable(skeletonParts.torso, skeletonParts.right_leg_vis, obj.Skeleton.RightHip)
             end
-            
             if skeletonParts.left_leg_vis then
                 drawBoneStable(skeletonParts.torso, skeletonParts.left_leg_vis, obj.Skeleton.LeftHip)
             end
@@ -1670,4 +1713,3 @@ local function Initialize()
 end
 
 Initialize()
-
