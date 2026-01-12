@@ -251,12 +251,12 @@ local function UpdateFriendlyStatus()
     if not Window or not Window.Flags["ESP/TeamCheck"] then
         return
     end
-    
+
     local cam = Workspace.CurrentCamera
     if not cam then return end
-    
+
     local processedModels = {}
-    
+
     for model, data in pairs(Cache.Soldiers) do
         if not IsValidModel(model) then
             Cache.Friendlies[model] = nil
@@ -265,16 +265,16 @@ local function UpdateFriendlyStatus()
             Cache.EnemyConfirmations[model] = nil
             continue
         end
-        
+
         local root = GetRoot(model)
         if not root then continue end
-        
+
         local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
-        
+
         if Cache.ConfirmedEnemies[model] then
             continue
         end
-        
+
         if not onScreen or screenPos.Z <= 0 then
             local enemyConfirms = Cache.EnemyConfirmations[model] or 0
             if enemyConfirms > 0 then
@@ -287,12 +287,12 @@ local function UpdateFriendlyStatus()
             end
             continue
         end
-        
+
         processedModels[model] = true
-        
+
         local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
         local foundIndicator = false
-        
+
         for i = 1, #Cache.FriendlyIndicators do
             local indicator = Cache.FriendlyIndicators[i]
             local dist = (indicator - screenPos2D).Magnitude
@@ -301,27 +301,27 @@ local function UpdateFriendlyStatus()
                 break
             end
         end
-        
+
         local currentScore = Cache.FriendlyScores[model] or 0
         local enemyConfirms = Cache.EnemyConfirmations[model] or 0
-        
+
         if foundIndicator then
-            currentScore = math.min(currentScore + 2, 8)
-            enemyConfirms = math.max(enemyConfirms - 2, 0)
+            currentScore = math.min(currentScore + 3, 8)
+            enemyConfirms = math.max(enemyConfirms - 1, 0)
         else
             currentScore = math.max(currentScore - 1, 0)
-            enemyConfirms = enemyConfirms + 2
+            enemyConfirms = enemyConfirms + 1
         end
-        
+
         Cache.FriendlyScores[model] = currentScore
         Cache.EnemyConfirmations[model] = enemyConfirms
         Cache.LastFriendlyUpdate[model] = tick()
-        
+
         if currentScore >= 3 then
             Cache.Friendlies[model] = true
             Cache.ConfirmedEnemies[model] = nil
             Cache.EnemyConfirmations[model] = 0
-        elseif enemyConfirms >= 4 then
+        elseif enemyConfirms >= 4 and currentScore <= 0 then
             Cache.Friendlies[model] = nil
             Cache.ConfirmedEnemies[model] = true
             Cache.EnemyConfirmations[model] = 999
@@ -329,7 +329,7 @@ local function UpdateFriendlyStatus()
             Cache.Friendlies[model] = nil
         end
     end
-    
+
     for model in pairs(Cache.FriendlyScores) do
         if not processedModels[model] and Cache.Soldiers[model] then
             if not Cache.ConfirmedEnemies[model] then
@@ -337,7 +337,7 @@ local function UpdateFriendlyStatus()
                 if tick() - lastUpdate > 2 then
                     Cache.FriendlyScores[model] = math.max((Cache.FriendlyScores[model] or 0) - 1, 0)
                     Cache.LastFriendlyUpdate[model] = tick()
-                    
+
                     if Cache.FriendlyScores[model] <= 0 then
                         Cache.Friendlies[model] = nil
                     end
