@@ -1269,59 +1269,26 @@ local function MainLoop()
         end
     end
     
-    local localRoot = GetLocalRoot()
-    if localRoot and Window.Flags["ESP/WallCheck"] then
-        local myPos = localRoot.Position
-        for model in pairs(Cache.Soldiers) do
-            if not IsValidModel(model) then continue end
-            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
-            local root = GetRoot(model)
-            if root then
-                Cache.WallCheckResults[model] = CheckWallBetween(myPos, root.Position)
-            end
-        end
-    end
-    
+    -- Removed wallcheck and closest enemy logic
+    Cache.WallCheckResults = {}
     Cache.ClosestEnemy = nil
-    if Window.Flags["ESP/ClosestEnemy"] and localRoot then
-        local myPos = localRoot.Position
-        local closestDist = math.huge
-        for model in pairs(Cache.Soldiers) do
-            if not IsValidModel(model) then continue end
-            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
-            if Window.Flags["ESP/TeamCheck"] and IsChecking(model) then continue end
-            local root = GetRoot(model)
-            if root then
-                local dist = (root.Position - myPos).Magnitude
-                if dist < closestDist then
-                    closestDist = dist
-                    Cache.ClosestEnemy = model
-                end
-            end
-        end
-    end
     
     ResetPool()
     
     if Window.Flags["ESP/Enabled"] then
         local myPos = GetLocalPosition()
         local maxDistSq = (Window.Flags["ESP/MaxDistance"] or 500) * (Window.Flags["ESP/MaxDistance"] or 500)
-        
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
-            
-            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then
-                continue
-            end
-            
+            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
+            -- Only show confirmed enemies if TeamCheck is on
+            if Window.Flags["ESP/TeamCheck"] and not Cache.ConfirmedEnemies[model] then continue end
             local root = GetRoot(model)
             if not root then continue end
-            
             local rootPos = root.Position
             local distVec = rootPos - myPos
             local distSq = distVec.X * distVec.X + distVec.Y * distVec.Y + distVec.Z * distVec.Z
             if distSq > maxDistSq then continue end
-            
             local espObj = GetPooledESP()
             RenderESP(espObj, model, cam, screenSize, screenCenter, myPos)
         end
@@ -1453,7 +1420,7 @@ local function Initialize()
     if not IsDeadlineGame() then
         warn("Deadline script loaded but game structure doesn't match. This might not be Deadline.")
         Parvus.Utilities.UI:Push({
-            Title = "Deadline",
+            Title = "Deadline - Made By gws☦",
             Description = "Game detection failed. Make sure you're in Deadline (ID: 12144402492)",
             Duration = 5
         })
