@@ -656,132 +656,134 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         if boxStyle == "ThreeD" then
             for i = 1, 4 do obj.Box[i].Visible = false end
             for i = 1, 8 do obj.Corners[i].Visible = false end
+            if obj.Box3D then
+                for _, line in pairs(obj.Box3D) do line.Visible = false end
+            end
             local root = GetRoot(model)
             local head = GetHead(model)
             if root and head then
-                local rootPos = root.Position
-                local headPos = head.Position
-                local height = (headPos.Y - rootPos.Y) * 1.5
-                local width = 2
-                local depth = 1
-                local corners = {
-                    Vector3.new(rootPos.X - width/2, rootPos.Y + height, rootPos.Z - depth/2),
-                    Vector3.new(rootPos.X + width/2, rootPos.Y + height, rootPos.Z - depth/2),
-                    Vector3.new(rootPos.X + width/2, rootPos.Y + height, rootPos.Z + depth/2),
-                    Vector3.new(rootPos.X - width/2, rootPos.Y + height, rootPos.Z + depth/2),
-                    Vector3.new(rootPos.X - width/2, rootPos.Y, rootPos.Z - depth/2),
-                    Vector3.new(rootPos.X + width/2, rootPos.Y, rootPos.Z - depth/2),
-                    Vector3.new(rootPos.X + width/2, rootPos.Y, rootPos.Z + depth/2),
-                    Vector3.new(rootPos.X - width/2, rootPos.Y, rootPos.Z + depth/2)
+                local Camera = cam
+                local cf = root.CFrame
+                local size = Vector3.new(2, (head.Position.Y - root.Position.Y) * 1.5, 1)
+                local color = color
+                local esp = obj
+                local front = {
+                    TL = Camera:WorldToViewportPoint((cf * CFrame.new(-size.X/2, size.Y/2, -size.Z/2)).Position),
+                    TR = Camera:WorldToViewportPoint((cf * CFrame.new(size.X/2, size.Y/2, -size.Z/2)).Position),
+                    BL = Camera:WorldToViewportPoint((cf * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2)).Position),
+                    BR = Camera:WorldToViewportPoint((cf * CFrame.new(size.X/2, -size.Y/2, -size.Z/2)).Position)
                 }
-                local screenCorners = {}
-                local allVisible = true
-                for i, corner in ipairs(corners) do
-                    local screenPos, onScreen = cam:WorldToViewportPoint(corner)
-                    if onScreen and screenPos.Z > 0 then
-                        screenCorners[i] = Vector2.new(screenPos.X, screenPos.Y)
-                    else
-                        allVisible = false
-                        break
-                    end
+                local back = {
+                    TL = Camera:WorldToViewportPoint((cf * CFrame.new(-size.X/2, size.Y/2, size.Z/2)).Position),
+                    TR = Camera:WorldToViewportPoint((cf * CFrame.new(size.X/2, size.Y/2, size.Z/2)).Position),
+                    BL = Camera:WorldToViewportPoint((cf * CFrame.new(-size.X/2, -size.Y/2, size.Z/2)).Position),
+                    BR = Camera:WorldToViewportPoint((cf * CFrame.new(size.X/2, -size.Y/2, size.Z/2)).Position)
+                }
+                if not (front.TL.Z > 0 and front.TR.Z > 0 and front.BL.Z > 0 and front.BR.Z > 0 and
+                        back.TL.Z > 0 and back.TR.Z > 0 and back.BL.Z > 0 and back.BR.Z > 0) then
+                    for _, obj in pairs(esp.Box) do obj.Visible = false end
+                    return
                 end
-                if allVisible then
-                    local lines = {
-                        {screenCorners[1], screenCorners[2]},
-                        {screenCorners[2], screenCorners[3]},
-                        {screenCorners[3], screenCorners[4]},
-                        {screenCorners[4], screenCorners[1]},
-                        {screenCorners[5], screenCorners[6]},
-                        {screenCorners[6], screenCorners[7]},
-                        {screenCorners[7], screenCorners[8]},
-                        {screenCorners[8], screenCorners[5]},
-                        {screenCorners[1], screenCorners[5]},
-                        {screenCorners[2], screenCorners[6]},
-                        {screenCorners[3], screenCorners[7]},
-                        {screenCorners[4], screenCorners[8]}
-                    }
-                    local box3d = obj.Box3D
-                    for i = 1, 12 do
-                        if box3d[i] then
-                            if i <= #lines then
-                                box3d[i].From = lines[i][1]
-                                box3d[i].To = lines[i][2]
-                                box3d[i].Color = color
-                                box3d[i].Visible = true
-                            else
-                                box3d[i].Visible = false
-                            end
-                        end
-                    end
-                else
-                    for i = 1, 12 do
-                        if obj.Box3D[i] then
-                            obj.Box3D[i].Visible = false
-                        end
-                    end
+                local function toVector2(v3) return Vector2.new(v3.X, v3.Y) end
+                front.TL, front.TR = toVector2(front.TL), toVector2(front.TR)
+                front.BL, front.BR = toVector2(front.BL), toVector2(front.BR)
+                back.TL, back.TR = toVector2(back.TL), toVector2(back.TR)
+                back.BL, back.BR = toVector2(back.BL), toVector2(back.BR)
+                esp.Box.TopLeft.From = front.TL
+                esp.Box.TopLeft.To = front.TR
+                esp.Box.TopLeft.Visible = true
+                esp.Box.TopRight.From = front.TR
+                esp.Box.TopRight.To = front.BR
+                esp.Box.TopRight.Visible = true
+                esp.Box.BottomLeft.From = front.BL
+                esp.Box.BottomLeft.To = front.BR
+                esp.Box.BottomLeft.Visible = true
+                esp.Box.BottomRight.From = front.TL
+                esp.Box.BottomRight.To = front.BL
+                esp.Box.BottomRight.Visible = true
+                esp.Box.Left.From = back.TL
+                esp.Box.Left.To = back.TR
+                esp.Box.Left.Visible = true
+                esp.Box.Right.From = back.TR
+                esp.Box.Right.To = back.BR
+                esp.Box.Right.Visible = true
+                esp.Box.Top.From = back.BL
+                esp.Box.Top.To = back.BR
+                esp.Box.Top.Visible = true
+                esp.Box.Bottom.From = back.TL
+                esp.Box.Bottom.To = back.BL
+                esp.Box.Bottom.Visible = true
+                local function drawConnectingLine(from, to, visible)
+                    local line = Drawing.new("Line")
+                    line.Visible = visible
+                    line.Color = color
+                    line.Thickness = Tuning.BoxThickness
+                    line.From = from
+                    line.To = to
+                    return line
                 end
-            else
-                for i = 1, 12 do
-                    if obj.Box3D[i] then
-                        obj.Box3D[i].Visible = false
+                local connectors = {
+                    drawConnectingLine(front.TL, back.TL, true),
+                    drawConnectingLine(front.TR, back.TR, true),
+                    drawConnectingLine(front.BL, back.BL, true),
+                    drawConnectingLine(front.BR, back.BR, true)
+                }
+                task.spawn(function()
+                    task.wait()
+                    for _, line in ipairs(connectors) do
+                        line:Remove()
                     end
-                end
+                end)
             end
         elseif boxStyle == "Corner" then
-            for i = 1, 4 do obj.Box[i].Visible = false end
-            if obj.Box3D then
-                for _, line in pairs(obj.Box3D) do
-                    line.Visible = false
-                end
-            end
-            local cl = Tuning.CornerLength
-            obj.Corners[1].From = Vector2.new(left, top)
-            obj.Corners[1].To = Vector2.new(left + cl, top)
-            obj.Corners[2].From = Vector2.new(left, top)
-            obj.Corners[2].To = Vector2.new(left, top + cl)
-            obj.Corners[3].From = Vector2.new(right, top)
-            obj.Corners[3].To = Vector2.new(right - cl, top)
-            obj.Corners[4].From = Vector2.new(right, top)
-            obj.Corners[4].To = Vector2.new(right, top + cl)
-            obj.Corners[5].From = Vector2.new(left, bottom)
-            obj.Corners[5].To = Vector2.new(left + cl, bottom)
-            obj.Corners[6].From = Vector2.new(left, bottom)
-            obj.Corners[6].To = Vector2.new(left, bottom - cl)
-            obj.Corners[7].From = Vector2.new(right, bottom)
-            obj.Corners[7].To = Vector2.new(right - cl, bottom)
-            obj.Corners[8].From = Vector2.new(right, bottom)
-            obj.Corners[8].To = Vector2.new(right, bottom - cl)
-            for i = 1, 8 do
-                obj.Corners[i].Color = color
-                obj.Corners[i].Visible = true
-            end
+            local cornerSize = boxW * 0.2
+            obj.Box.TopLeft.From = Vector2.new(left, top)
+            obj.Box.TopLeft.To = Vector2.new(left + cornerSize, top)
+            obj.Box.TopLeft.Visible = true
+            obj.Box.TopRight.From = Vector2.new(right, top)
+            obj.Box.TopRight.To = Vector2.new(right - cornerSize, top)
+            obj.Box.TopRight.Visible = true
+            obj.Box.BottomLeft.From = Vector2.new(left, bottom)
+            obj.Box.BottomLeft.To = Vector2.new(left + cornerSize, bottom)
+            obj.Box.BottomLeft.Visible = true
+            obj.Box.BottomRight.From = Vector2.new(right, bottom)
+            obj.Box.BottomRight.To = Vector2.new(right - cornerSize, bottom)
+            obj.Box.BottomRight.Visible = true
+            obj.Box.Left.From = Vector2.new(left, top)
+            obj.Box.Left.To = Vector2.new(left, top + cornerSize)
+            obj.Box.Left.Visible = true
+            obj.Box.Right.From = Vector2.new(right, top)
+            obj.Box.Right.To = Vector2.new(right, top + cornerSize)
+            obj.Box.Right.Visible = true
+            obj.Box.Top.From = Vector2.new(left, bottom)
+            obj.Box.Top.To = Vector2.new(left, bottom - cornerSize)
+            obj.Box.Top.Visible = true
+            obj.Box.Bottom.From = Vector2.new(right, bottom)
+            obj.Box.Bottom.To = Vector2.new(right, bottom - cornerSize)
+            obj.Box.Bottom.Visible = true
         else
-            for i = 1, 8 do obj.Corners[i].Visible = false end
-            if obj.Box3D then
-                for _, line in pairs(obj.Box3D) do
-                    line.Visible = false
-                end
-            end
-            obj.Box[1].From = Vector2.new(left, top)
-            obj.Box[1].To = Vector2.new(right, top)
-            obj.Box[2].From = Vector2.new(right, top)
-            obj.Box[2].To = Vector2.new(right, bottom)
-            obj.Box[3].From = Vector2.new(right, bottom)
-            obj.Box[3].To = Vector2.new(left, bottom)
-            obj.Box[4].From = Vector2.new(left, bottom)
-            obj.Box[4].To = Vector2.new(left, top)
-            for i = 1, 4 do
-                obj.Box[i].Color = color
-                obj.Box[i].Visible = true
-            end
+            obj.Box.Left.From = Vector2.new(left, top)
+            obj.Box.Left.To = Vector2.new(left, bottom)
+            obj.Box.Left.Visible = true
+            obj.Box.Right.From = Vector2.new(right, top)
+            obj.Box.Right.To = Vector2.new(right, bottom)
+            obj.Box.Right.Visible = true
+            obj.Box.Top.From = Vector2.new(left, top)
+            obj.Box.Top.To = Vector2.new(right, top)
+            obj.Box.Top.Visible = true
+            obj.Box.Bottom.From = Vector2.new(left, bottom)
+            obj.Box.Bottom.To = Vector2.new(right, bottom)
+            obj.Box.Bottom.Visible = true
+            obj.Box.TopLeft.Visible = false
+            obj.Box.TopRight.Visible = false
+            obj.Box.BottomLeft.Visible = false
+            obj.Box.BottomRight.Visible = false
         end
     else
         for i = 1, 4 do obj.Box[i].Visible = false end
         for i = 1, 8 do obj.Corners[i].Visible = false end
         if obj.Box3D then
-            for _, line in pairs(obj.Box3D) do
-                line.Visible = false
-            end
+            for _, line in pairs(obj.Box3D) do line.Visible = false end
         end
     end
     
