@@ -1,8 +1,3 @@
---[[
-	WARNING: Heads up! This script has not been verified by ScriptBlox. Use at your own risk!
-]]
--- More open source scripts at https://xan.bar
--- This WILL NOT WORK ON LOW UNC EXECUTORS LIKE XENO
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -11,7 +6,6 @@ local Lighting = game:GetService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
 
--- Ensure Parvus is loaded
 if not Parvus or not Parvus.Utilities or not Parvus.Utilities.UI then
     error("Varus UI system not found. Please load Varus first.")
 end
@@ -64,7 +58,9 @@ local Cache = {
     ConfirmedEnemies = {},
     EnemyConfirmations = {},
     FriendlyIndicators = {},
-    LastFriendlyUpdate = {}
+    LastFriendlyUpdate = {},
+    WallCheckResults = {},
+    ClosestEnemy = nil
 }
 
 local ESP = {
@@ -106,7 +102,6 @@ local function GetTorso(model)
 end
 
 local function GetHumanoid(model)
-    -- Try to find humanoid in the model
     return model:FindFirstChildOfClass("Humanoid") or model:FindFirstChild("Humanoid")
 end
 
@@ -177,7 +172,6 @@ local function ScanFriendlyIndicators()
 end
 
 local function DetectTeammates()
-    -- Detect teammates when teamcheck is off
     local Window = getgenv().Window
     if not Window or Window.Flags["ESP/TeamCheck"] then return end
     
@@ -187,7 +181,6 @@ local function DetectTeammates()
     
     if not myTeam then return end
     
-    -- Get all players on my team
     local myTeamPlayers = {}
     for _, player in pairs(Players:GetPlayers()) do
         if player.Team == myTeam and player ~= LocalPlayer then
@@ -195,7 +188,6 @@ local function DetectTeammates()
         end
     end
     
-    -- Match models to players and mark teammates as friendlies
     for model in pairs(Cache.Soldiers) do
         if not IsValidModel(model) then continue end
         
@@ -205,14 +197,12 @@ local function DetectTeammates()
         local modelPos = root.Position
         local isTeammate = false
         
-        -- Try to match model to a player by position/proximity
         for player, _ in pairs(myTeamPlayers) do
             if player.Character then
                 local charRoot = player.Character:FindFirstChild("HumanoidRootPart") or player.Character:FindFirstChild("humanoid_root_part")
                 if charRoot then
                     local dist = (charRoot.Position - modelPos).Magnitude
                     if dist < 2 then
-                        -- This model likely belongs to this teammate
                         isTeammate = true
                         break
                     end
@@ -220,10 +210,8 @@ local function DetectTeammates()
             end
         end
         
-        -- Also check if model has team indicator in its name or properties
         if not isTeammate then
             pcall(function()
-                -- Check for team-related properties
                 if model:FindFirstChild("Team") then
                     local modelTeam = model.Team
                     if typeof(modelTeam) == "Instance" and modelTeam:IsA("Team") then
@@ -239,10 +227,8 @@ local function DetectTeammates()
             Cache.Friendlies[model] = true
             Cache.ConfirmedEnemies[model] = nil
             Cache.EnemyConfirmations[model] = 0
-            Cache.FriendlyScores[model] = 8 -- High score to keep as friendly
+            Cache.FriendlyScores[model] = 8
         else
-            -- Not a teammate, but don't mark as enemy when teamcheck is off
-            -- Just clear friendly status
             if Cache.Friendlies[model] then
                 Cache.Friendlies[model] = nil
             end
@@ -251,12 +237,13 @@ local function DetectTeammates()
 end
 
 local function ClearTeamCache()
-    -- Clear all team-related cache
     Cache.Friendlies = {}
     Cache.FriendlyScores = {}
     Cache.ConfirmedEnemies = {}
     Cache.EnemyConfirmations = {}
     Cache.LastFriendlyUpdate = {}
+    Cache.WallCheckResults = {}
+    Cache.ClosestEnemy = nil
 end
 
 local function UpdateFriendlyStatus()
@@ -293,7 +280,6 @@ local function UpdateFriendlyStatus()
             if enemyConfirms > 0 then
                 Cache.EnemyConfirmations[model] = enemyConfirms + 1
                 if Cache.EnemyConfirmations[model] >= 4 then
-                    -- Require more confirmations before marking as enemy
                     Cache.ConfirmedEnemies[model] = true
                     Cache.Friendlies[model] = nil
                     Cache.EnemyConfirmations[model] = 999
@@ -336,7 +322,6 @@ local function UpdateFriendlyStatus()
             Cache.ConfirmedEnemies[model] = nil
             Cache.EnemyConfirmations[model] = 0
         elseif enemyConfirms >= 4 then
-            -- Require more confirmations before marking as enemy to prevent false positives
             Cache.Friendlies[model] = nil
             Cache.ConfirmedEnemies[model] = true
             Cache.EnemyConfirmations[model] = 999
@@ -366,7 +351,6 @@ local function IsFriendly(model)
     local Window = getgenv().Window
     if not Window then return false end
     
-    -- When teamcheck is off, still check if marked as friendly (teammates)
     if not Window.Flags["ESP/TeamCheck"] then
         return Cache.Friendlies[model] == true
     end
@@ -383,13 +367,27 @@ local function IsChecking(model)
     return true
 end
 
+local function CheckWallBetween(from, to)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    
+    local direction = (to - from)
+    local distance = direction.Magnitude
+    local ray = Workspace:Raycast(from, direction)
+    
+    if not ray then return true end
+    
+    local hitDistance = (ray.Position - from).Magnitude
+    return hitDistance >= distance * 0.95
+end
+
 local function GetPlayerStatus(model)
     local Window = getgenv().Window
     if not Window then
         return "neutral", Palette.Enemy
     end
     
-    -- Get color from flags if available
     local enemyColor = Palette.Enemy
     local friendlyColor = Palette.Friendly
     local checkingColor = Palette.Checking
@@ -419,6 +417,17 @@ local function GetPlayerStatus(model)
         elseif typeof(colorData) == "Color3" then
             checkingColor = colorData
         end
+    end
+    
+    local isClosest = Window.Flags["ESP/ClosestEnemy"] and Cache.ClosestEnemy == model
+    local isInOpen = Window.Flags["ESP/WallCheck"] and Cache.WallCheckResults[model] == true
+    
+    if isInOpen and isClosest then
+        return "enemy", Color3.fromRGB(0, 255, 0)
+    elseif isInOpen then
+        return "enemy", Color3.fromRGB(0, 255, 0)
+    elseif isClosest then
+        return "enemy", Color3.fromRGB(255, 0, 255)
     end
     
     if not Window.Flags["ESP/TeamCheck"] then
@@ -454,11 +463,6 @@ local function CreateESPObject()
         Distance = Drawing.new("Text"),
         Tracer = Drawing.new("Line"),
         Fill = Drawing.new("Square"),
-        HealthBar = {
-            Outline = Drawing.new("Square"),
-            Fill = Drawing.new("Square"),
-            Text = Drawing.new("Text")
-        },
         Skeleton = {
             Head = Drawing.new("Line"),
             UpperSpine = Drawing.new("Line"),
@@ -489,7 +493,6 @@ local function CreateESPObject()
         obj.Corners[i].Visible = false
     end
     
-    -- Setup 3D box lines
     for _, line in pairs(obj.Box3D) do
         line.Thickness = Tuning.BoxThickness
         line.Visible = false
@@ -515,18 +518,6 @@ local function CreateESPObject()
     obj.Fill.Transparency = 0.15
     obj.Fill.Visible = false
     
-    -- Setup health bar
-    obj.HealthBar.Outline.Filled = false
-    obj.HealthBar.Outline.Thickness = 1
-    obj.HealthBar.Outline.Visible = false
-    obj.HealthBar.Fill.Filled = true
-    obj.HealthBar.Fill.Visible = false
-    obj.HealthBar.Text.Size = 12
-    obj.HealthBar.Text.Font = Drawing.Fonts.Plex
-    obj.HealthBar.Text.Outline = true
-    obj.HealthBar.Text.Visible = false
-    
-    -- Setup skeleton lines
     for _, line in pairs(obj.Skeleton) do
         line.Thickness = 1.5
         line.Visible = false
@@ -552,11 +543,6 @@ local function HideESP(obj)
     if obj.Distance then obj.Distance.Visible = false end
     if obj.Tracer then obj.Tracer.Visible = false end
     if obj.Fill then obj.Fill.Visible = false end
-    if obj.HealthBar then
-        if obj.HealthBar.Outline then obj.HealthBar.Outline.Visible = false end
-        if obj.HealthBar.Fill then obj.HealthBar.Fill.Visible = false end
-        if obj.HealthBar.Text then obj.HealthBar.Text.Visible = false end
-    end
     if obj.Skeleton then
         for _, line in pairs(obj.Skeleton) do
             if line then line.Visible = false end
@@ -582,11 +568,6 @@ local function DestroyESP(obj)
         if obj.Distance then obj.Distance:Remove() end
         if obj.Tracer then obj.Tracer:Remove() end
         if obj.Fill then obj.Fill:Remove() end
-        if obj.HealthBar then
-            if obj.HealthBar.Outline then obj.HealthBar.Outline:Remove() end
-            if obj.HealthBar.Fill then obj.HealthBar.Fill:Remove() end
-            if obj.HealthBar.Text then obj.HealthBar.Text:Remove() end
-        end
         if obj.Skeleton then
             for _, line in pairs(obj.Skeleton) do
                 if line then line:Remove() end
@@ -629,15 +610,32 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         return
     end
     
-    local screenPos, onScreen = cam:WorldToViewportPoint(rootPos)
+    local head = GetHead(model)
+    local characterCenter = rootPos
+    if head then
+        characterCenter = (rootPos + head.Position) / 2
+    end
+    
+    local screenPos, onScreen = cam:WorldToViewportPoint(characterCenter)
     
     if not onScreen or screenPos.Z <= 0 then
         HideESP(obj)
         return
     end
     
+    local headScreen = nil
+    if head then
+        headScreen = cam:WorldToViewportPoint(head.Position)
+    end
+    
     local baseHeight = 1200 / math.max(screenPos.Z, 1)
     local boxH = math.clamp(baseHeight, Tuning.MinBoxSize, Tuning.MaxBoxSize)
+    
+    if headScreen and headScreen.Z > 0 then
+        local headHeight = math.abs(headScreen.Y - screenPos.Y) * 2.2
+        boxH = math.max(boxH, headHeight)
+    end
+    
     local boxW = boxH * Tuning.BoxRatio
     
     local cx, cy = screenPos.X, screenPos.Y
@@ -656,166 +654,56 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
             boxStyle = boxStyleValue[1]
         end
         
-        -- Hide all box types first
-        for i = 1, 4 do obj.Box[i].Visible = false end
-        for i = 1, 8 do obj.Corners[i].Visible = false end
-        if obj.Box3D then
-            for _, line in pairs(obj.Box3D) do
-                line.Visible = false
-            end
-        end
-        
         if boxStyle == "ThreeD" then
-            -- 3D Box ESP - Use actual model size
-            local rootCF = root.CFrame
-            local head = GetHead(model)
-            local torso = GetTorso(model)
-            
-            -- Calculate actual model size in studs
-            local modelHeight = 5 -- Default height
-            if head and root then
-                local headToRoot = (head.Position - root.Position).Magnitude
-                modelHeight = headToRoot * 2.2 -- Approximate full height
+            for i = 1, 4 do obj.Box[i].Visible = false end
+            for i = 1, 8 do obj.Corners[i].Visible = false end
+            if obj.Box3D then
+                for _, line in pairs(obj.Box3D) do
+                    line.Visible = false
+                end
             end
-            
-            -- Use reasonable proportions for humanoid
-            local modelWidth = 2.5 -- Typical humanoid width
-            local modelDepth = 1.5 -- Typical humanoid depth
-            local size = Vector3.new(modelWidth, modelHeight, modelDepth)
-            
-            local front = {
-                TL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, -size.Z/2)).Position),
-                TR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, -size.Z/2)).Position),
-                BL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2)).Position),
-                BR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, -size.Z/2)).Position)
-            }
-            
-            local back = {
-                TL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, size.Y/2, size.Z/2)).Position),
-                TR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, size.Y/2, size.Z/2)).Position),
-                BL = cam:WorldToViewportPoint((rootCF * CFrame.new(-size.X/2, -size.Y/2, size.Z/2)).Position),
-                BR = cam:WorldToViewportPoint((rootCF * CFrame.new(size.X/2, -size.Y/2, size.Z/2)).Position)
-            }
-            
-            if not (front.TL.Z > 0 and front.TR.Z > 0 and front.BL.Z > 0 and front.BR.Z > 0 and
-                   back.TL.Z > 0 and back.TR.Z > 0 and back.BL.Z > 0 and back.BR.Z > 0) then
-                return
-            end
-            
-            local function toVector2(v3) return Vector2.new(v3.X, v3.Y) end
-            front.TL, front.TR = toVector2(front.TL), toVector2(front.TR)
-            front.BL, front.BR = toVector2(front.BL), toVector2(front.BR)
-            back.TL, back.TR = toVector2(back.TL), toVector2(back.TR)
-            back.BL, back.BR = toVector2(back.BL), toVector2(back.BR)
-            
-            -- Front face
-            obj.Box3D.TopLeft.From = front.TL
-            obj.Box3D.TopLeft.To = front.TR
-            obj.Box3D.TopLeft.Color = color
-            obj.Box3D.TopLeft.Visible = true
-            
-            obj.Box3D.TopRight.From = front.TR
-            obj.Box3D.TopRight.To = front.BR
-            obj.Box3D.TopRight.Color = color
-            obj.Box3D.TopRight.Visible = true
-            
-            obj.Box3D.BottomLeft.From = front.BL
-            obj.Box3D.BottomLeft.To = front.BR
-            obj.Box3D.BottomLeft.Color = color
-            obj.Box3D.BottomLeft.Visible = true
-            
-            obj.Box3D.BottomRight.From = front.TL
-            obj.Box3D.BottomRight.To = front.BL
-            obj.Box3D.BottomRight.Color = color
-            obj.Box3D.BottomRight.Visible = true
-            
-            -- Back face
-            obj.Box3D.Left.From = back.TL
-            obj.Box3D.Left.To = back.TR
-            obj.Box3D.Left.Color = color
-            obj.Box3D.Left.Visible = true
-            
-            obj.Box3D.Right.From = back.TR
-            obj.Box3D.Right.To = back.BR
-            obj.Box3D.Right.Color = color
-            obj.Box3D.Right.Visible = true
-            
-            obj.Box3D.Top.From = back.BL
-            obj.Box3D.Top.To = back.BR
-            obj.Box3D.Top.Color = color
-            obj.Box3D.Top.Visible = true
-            
-            obj.Box3D.Bottom.From = back.TL
-            obj.Box3D.Bottom.To = back.BL
-            obj.Box3D.Bottom.Color = color
-            obj.Box3D.Bottom.Visible = true
-            
-            -- Connecting lines (front to back)
-            local connectors = {
-                {From = front.TL, To = back.TL},
-                {From = front.TR, To = back.TR},
-                {From = front.BL, To = back.BL},
-                {From = front.BR, To = back.BR}
-            }
-            
-            -- Use existing box lines for connectors temporarily
-            for i = 1, 4 do
-                if connectors[i] then
-                    obj.Box[i].From = connectors[i].From
-                    obj.Box[i].To = connectors[i].To
-                    obj.Box[i].Color = color
-                    obj.Box[i].Visible = true
+        elseif boxStyle == "Corner" then
+            for i = 1, 4 do obj.Box[i].Visible = false end
+            if obj.Box3D then
+                for _, line in pairs(obj.Box3D) do
+                    line.Visible = false
                 end
             end
             
-        elseif boxStyle == "Corner" then
-            -- Corner Box ESP
-            local boxPosition = Vector2.new(left, top)
-            local boxSize = Vector2.new(boxW, boxH)
-            local cornerSize = boxW * 0.2
+            local cl = Tuning.CornerLength
             
-            obj.Corners[1].From = boxPosition
-            obj.Corners[1].To = boxPosition + Vector2.new(cornerSize, 0)
-            obj.Corners[1].Color = color
-            obj.Corners[1].Visible = true
+            obj.Corners[1].From = Vector2.new(left, top)
+            obj.Corners[1].To = Vector2.new(left + cl, top)
+            obj.Corners[2].From = Vector2.new(left, top)
+            obj.Corners[2].To = Vector2.new(left, top + cl)
             
-            obj.Corners[2].From = boxPosition
-            obj.Corners[2].To = boxPosition + Vector2.new(0, cornerSize)
-            obj.Corners[2].Color = color
-            obj.Corners[2].Visible = true
+            obj.Corners[3].From = Vector2.new(right, top)
+            obj.Corners[3].To = Vector2.new(right - cl, top)
+            obj.Corners[4].From = Vector2.new(right, top)
+            obj.Corners[4].To = Vector2.new(right, top + cl)
             
-            obj.Corners[3].From = boxPosition + Vector2.new(boxSize.X, 0)
-            obj.Corners[3].To = boxPosition + Vector2.new(boxSize.X - cornerSize, 0)
-            obj.Corners[3].Color = color
-            obj.Corners[3].Visible = true
+            obj.Corners[5].From = Vector2.new(left, bottom)
+            obj.Corners[5].To = Vector2.new(left + cl, bottom)
+            obj.Corners[6].From = Vector2.new(left, bottom)
+            obj.Corners[6].To = Vector2.new(left, bottom - cl)
             
-            obj.Corners[4].From = boxPosition + Vector2.new(boxSize.X, 0)
-            obj.Corners[4].To = boxPosition + Vector2.new(boxSize.X, cornerSize)
-            obj.Corners[4].Color = color
-            obj.Corners[4].Visible = true
+            obj.Corners[7].From = Vector2.new(right, bottom)
+            obj.Corners[7].To = Vector2.new(right - cl, bottom)
+            obj.Corners[8].From = Vector2.new(right, bottom)
+            obj.Corners[8].To = Vector2.new(right, bottom - cl)
             
-            obj.Corners[5].From = boxPosition + Vector2.new(0, boxSize.Y)
-            obj.Corners[5].To = boxPosition + Vector2.new(cornerSize, boxSize.Y)
-            obj.Corners[5].Color = color
-            obj.Corners[5].Visible = true
-            
-            obj.Corners[6].From = boxPosition + Vector2.new(0, boxSize.Y)
-            obj.Corners[6].To = boxPosition + Vector2.new(0, boxSize.Y - cornerSize)
-            obj.Corners[6].Color = color
-            obj.Corners[6].Visible = true
-            
-            obj.Corners[7].From = boxPosition + Vector2.new(boxSize.X, boxSize.Y)
-            obj.Corners[7].To = boxPosition + Vector2.new(boxSize.X - cornerSize, boxSize.Y)
-            obj.Corners[7].Color = color
-            obj.Corners[7].Visible = true
-            
-            obj.Corners[8].From = boxPosition + Vector2.new(boxSize.X, boxSize.Y)
-            obj.Corners[8].To = boxPosition + Vector2.new(boxSize.X, boxSize.Y - cornerSize)
-            obj.Corners[8].Color = color
-            obj.Corners[8].Visible = true
-            
+            for i = 1, 8 do
+                obj.Corners[i].Color = color
+                obj.Corners[i].Visible = true
+            end
         else
-            -- Full Box ESP (default)
+            for i = 1, 8 do obj.Corners[i].Visible = false end
+            if obj.Box3D then
+                for _, line in pairs(obj.Box3D) do
+                    line.Visible = false
+                end
+            end
+            
             obj.Box[1].From = Vector2.new(left, top)
             obj.Box[1].To = Vector2.new(right, top)
             obj.Box[2].From = Vector2.new(right, top)
@@ -843,7 +731,18 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
     if Window.Flags["ESP/BoxFill"] then
         obj.Fill.Position = Vector2.new(left, top)
         obj.Fill.Size = Vector2.new(boxW, bottom - top)
-        obj.Fill.Color = color
+        
+        local fillColor = color
+        if Window.Flags["ESP/BoxFillColor"] then
+            local colorData = Window.Flags["ESP/BoxFillColor"]
+            if type(colorData) == "table" and colorData[6] then
+                fillColor = colorData[6]
+            elseif typeof(colorData) == "Color3" then
+                fillColor = colorData
+            end
+        end
+        
+        obj.Fill.Color = fillColor
         obj.Fill.Visible = true
     else
         obj.Fill.Visible = false
@@ -911,49 +810,87 @@ local function RenderESP(obj, model, cam, screenSize, screenCenter, myPos)
         obj.Tracer.Visible = false
     end
     
-    -- Health Bar ESP
-    if Window.Flags["ESP/HealthBar"] then
-        local humanoid = GetHumanoid(model)
-        if humanoid then
-            local health = humanoid.Health
-            local maxHealth = humanoid.MaxHealth
-            local healthPercent = math.clamp(health / maxHealth, 0, 1)
+    if Window.Flags["ESP/Skeleton"] then
+        local function getBonePositions(model)
+            if not model then return nil end
             
-            local barHeight = boxH * 0.8
-            local barWidth = 4
-            local barPos = Vector2.new(
-                left - barWidth - 2,
-                top + (boxH - barHeight) / 2
-            )
+            local skeletonParts = {
+                head = GetHead(model) or model:FindFirstChild("head"),
+                torso = GetTorso(model) or model:FindFirstChild("torso"),
+                right_arm_vis = model:FindFirstChild("right_arm_vis") or model:FindFirstChild("Right Arm") or model:FindFirstChild("right_arm"),
+                left_arm_vis = model:FindFirstChild("left_arm_vis") or model:FindFirstChild("Left Arm") or model:FindFirstChild("left_arm"),
+                right_leg_vis = model:FindFirstChild("right_leg_vis") or model:FindFirstChild("Right Leg") or model:FindFirstChild("right_leg"),
+                left_leg_vis = model:FindFirstChild("left_leg_vis") or model:FindFirstChild("Left Leg") or model:FindFirstChild("left_leg")
+            }
             
-            obj.HealthBar.Outline.Size = Vector2.new(barWidth, barHeight)
-            obj.HealthBar.Outline.Position = barPos
-            obj.HealthBar.Outline.Color = color
-            obj.HealthBar.Outline.Visible = true
+            if not (skeletonParts.head and skeletonParts.torso) then return nil end
             
-            local fillHeight = barHeight * healthPercent
-            obj.HealthBar.Fill.Size = Vector2.new(barWidth - 2, fillHeight)
-            obj.HealthBar.Fill.Position = Vector2.new(barPos.X + 1, barPos.Y + barHeight * (1 - healthPercent))
-            obj.HealthBar.Fill.Color = Color3.fromRGB(255 - (255 * healthPercent), 255 * healthPercent, 0)
-            obj.HealthBar.Fill.Visible = true
+            return skeletonParts
+        end
+        
+        local skeletonParts = getBonePositions(model)
+        if skeletonParts then
+            for _, line in pairs(obj.Skeleton) do
+                line.Visible = false
+            end
             
-            if Window.Flags["ESP/HealthText"] then
-                obj.HealthBar.Text.Text = math.floor(health) .. "/" .. math.floor(maxHealth)
-                obj.HealthBar.Text.Position = Vector2.new(barPos.X + barWidth + 2, barPos.Y + barHeight / 2)
-                obj.HealthBar.Text.Color = color
-                obj.HealthBar.Text.Visible = true
-            else
-                obj.HealthBar.Text.Visible = false
+            local function drawBoneStable(from, to, line)
+                if not from or not to then 
+                    line.Visible = false
+                    return 
+                end
+                
+                local fromScreen, fromVisible = cam:WorldToViewportPoint(from.Position)
+                local toScreen, toVisible = cam:WorldToViewportPoint(to.Position)
+                
+                if not (fromVisible and toVisible) or fromScreen.Z < 0 or toScreen.Z < 0 then
+                    line.Visible = false
+                    return
+                end
+                
+                local screenBounds = cam.ViewportSize
+                if fromScreen.X < -100 or fromScreen.X > screenBounds.X + 100 or
+                   fromScreen.Y < -100 or fromScreen.Y > screenBounds.Y + 100 or
+                   toScreen.X < -100 or toScreen.X > screenBounds.X + 100 or
+                   toScreen.Y < -100 or toScreen.Y > screenBounds.Y + 100 then
+                    line.Visible = false
+                    return
+                end
+                
+                line.From = Vector2.new(fromScreen.X, fromScreen.Y)
+                line.To = Vector2.new(toScreen.X, toScreen.Y)
+                
+                line.Color = color
+                line.Thickness = Window.Flags["ESP/SkeletonThickness"] or 1.5
+                line.Visible = true
+            end
+            
+            drawBoneStable(skeletonParts.head, skeletonParts.torso, obj.Skeleton.Head)
+            
+            if skeletonParts.right_arm_vis then
+                drawBoneStable(skeletonParts.torso, skeletonParts.right_arm_vis, obj.Skeleton.RightShoulder)
+            end
+            
+            if skeletonParts.left_arm_vis then
+                drawBoneStable(skeletonParts.torso, skeletonParts.left_arm_vis, obj.Skeleton.LeftShoulder)
+            end
+            
+            if skeletonParts.right_leg_vis then
+                drawBoneStable(skeletonParts.torso, skeletonParts.right_leg_vis, obj.Skeleton.RightHip)
+            end
+            
+            if skeletonParts.left_leg_vis then
+                drawBoneStable(skeletonParts.torso, skeletonParts.left_leg_vis, obj.Skeleton.LeftHip)
             end
         else
-            obj.HealthBar.Outline.Visible = false
-            obj.HealthBar.Fill.Visible = false
-            obj.HealthBar.Text.Visible = false
+            for _, line in pairs(obj.Skeleton) do
+                line.Visible = false
+            end
         end
     else
-        obj.HealthBar.Outline.Visible = false
-        obj.HealthBar.Fill.Visible = false
-        obj.HealthBar.Text.Visible = false
+        for _, line in pairs(obj.Skeleton) do
+            line.Visible = false
+        end
     end
 end
 
@@ -982,16 +919,6 @@ local function UpdateChams(model)
     if not Window then return end
     
     local status, fillColor = GetPlayerStatus(model)
-    if not Window.Flags["ESP/TeamCheck"] then
-        fillColor = Palette.ChamsFill
-    elseif status == "friendly" then
-        fillColor = Palette.Friendly
-    elseif status == "checking" then
-        fillColor = Palette.Checking
-    else
-        fillColor = Palette.ChamsFill
-    end
-    
     h.FillColor = fillColor
     h.OutlineTransparency = Window.Flags["ESP/ChamsOutline"] and 0 or 1
 end
@@ -1060,6 +987,14 @@ FOVCircle.Visible = false
 FOVCircle.Color = Color3.fromRGB(255, 75, 85)
 FOVCircle.Transparency = 0.7
 
+local PredictionDot = Drawing.new("Circle")
+PredictionDot.Thickness = 1
+PredictionDot.NumSides = 32
+PredictionDot.Filled = true
+PredictionDot.Visible = false
+PredictionDot.Color = Color3.fromRGB(255, 255, 255)
+PredictionDot.Transparency = 0.3
+
 local function GetClosestTarget(cam, mousePos)
     local Window = getgenv().Window
     if not Window then return nil end
@@ -1113,15 +1048,13 @@ local function CalculatePrediction(targetPart, cam, weaponType)
         return targetPart.Position
     end
     
-    -- Get weapon type settings
     local weaponTypeValue = Window.Flags["AIM/PredictionType"]
     local weaponTypeStr = "Rifle"
     if type(weaponTypeValue) == "table" and #weaponTypeValue > 0 then
         weaponTypeStr = weaponTypeValue[1]
     end
     
-    -- Bullet speeds (studs per second)
-    local bulletSpeed = 1000 -- Default rifle speed
+    local bulletSpeed = 1000
     if weaponTypeStr == "Sniper" then
         bulletSpeed = 2000
     elseif weaponTypeStr == "Pistol" then
@@ -1130,19 +1063,16 @@ local function CalculatePrediction(targetPart, cam, weaponType)
         bulletSpeed = 1000
     end
     
-    -- Get target velocity
     local root = GetRoot(targetPart.Parent)
     if not root then return targetPart.Position end
     
     local targetVelocity = root.AssemblyLinearVelocity or Vector3.new(0, 0, 0)
     
-    -- Calculate time to target
     local myPos = GetLocalPosition()
     local targetPos = targetPart.Position
     local distance = (targetPos - myPos).Magnitude
     local timeToTarget = distance / bulletSpeed
     
-    -- Predict position
     local predictedPosition = targetPos + (targetVelocity * timeToTarget)
     
     return predictedPosition
@@ -1150,21 +1080,56 @@ end
 
 local function ProcessAimbot(cam, screenCenter)
     local Window = getgenv().Window
-    if not Window then return end
+    if not Window then 
+        PredictionDot.Visible = false
+        return 
+    end
+    
+    if not cam or not LocalPlayer.Character or not GetLocalRoot() then
+        PredictionDot.Visible = false
+        return
+    end
     
     local mousePos = UserInputService:GetMouseLocation()
     local isHoldingRMB = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     
+    local cameraFOV = Window.Flags["AIM/CameraFOV"] or 70
+    if cam and cam.FieldOfView ~= cameraFOV then
+        pcall(function()
+            cam.FieldOfView = cameraFOV
+        end)
+    end
+    
     FOVCircle.Position = mousePos
     FOVCircle.Radius = Window.Flags["AIM/FOV"] or 180
     FOVCircle.Visible = Window.Flags["AIM/Enabled"] and Window.Flags["AIM/ShowFOV"]
-    FOVCircle.Color = isHoldingRMB and Color3.fromRGB(85, 220, 120) or Color3.fromRGB(255, 75, 85)
     
-    if not Window.Flags["AIM/Enabled"] then return end
-    if not isHoldingRMB then return end
+    local fovColor = Color3.fromRGB(255, 75, 85)
+    if Window.Flags["AIM/FOVColor"] then
+        local colorData = Window.Flags["AIM/FOVColor"]
+        if type(colorData) == "table" and colorData[6] then
+            fovColor = colorData[6]
+        elseif typeof(colorData) == "Color3" then
+            fovColor = colorData
+        end
+    end
+    
+    FOVCircle.Color = isHoldingRMB and Color3.fromRGB(85, 220, 120) or fovColor
+    
+    if not Window.Flags["AIM/Enabled"] then 
+        PredictionDot.Visible = false
+        return 
+    end
+    if not isHoldingRMB then 
+        PredictionDot.Visible = false
+        return 
+    end
     
     local target = GetClosestTarget(cam, mousePos)
-    if not target then return end
+    if not target then 
+        PredictionDot.Visible = false
+        return 
+    end
     
     local targetPart
     local targetPartValue = Window.Flags["AIM/TargetPart"]
@@ -1184,11 +1149,38 @@ local function ProcessAimbot(cam, screenCenter)
         targetPart = target:FindFirstChild("humanoid_root_part")
     end
     
-    if not targetPart then return end
+    if not targetPart then 
+        PredictionDot.Visible = false
+        return 
+    end
     
-    -- Use prediction if enabled
     local targetPosition = CalculatePrediction(targetPart, cam, Window.Flags["AIM/PredictionType"])
     local screenPos = cam:WorldToViewportPoint(targetPosition)
+    
+    if Window.Flags["AIM/Prediction"] and Window.Flags["AIM/PredictionDot"] then
+        if screenPos.Z > 0 then
+            local dotSize = Window.Flags["AIM/PredictionDotSize"] or 5
+            local dotColor = Color3.fromRGB(255, 255, 255)
+            if Window.Flags["AIM/PredictionDotColor"] then
+                local colorData = Window.Flags["AIM/PredictionDotColor"]
+                if type(colorData) == "table" and colorData[6] then
+                    dotColor = colorData[6]
+                elseif typeof(colorData) == "Color3" then
+                    dotColor = colorData
+                end
+            end
+            
+            PredictionDot.Position = Vector2.new(screenPos.X, screenPos.Y)
+            PredictionDot.Radius = dotSize
+            PredictionDot.Color = dotColor
+            PredictionDot.Visible = true
+        else
+            PredictionDot.Visible = false
+        end
+    else
+        PredictionDot.Visible = false
+    end
+    
     local delta = Vector2.new(screenPos.X, screenPos.Y) - mousePos
     local smooth = Window.Flags["AIM/Smooth"] or 0.18
     
@@ -1217,6 +1209,7 @@ local function Unload()
     
     pcall(function()
         if FOVCircle then FOVCircle:Remove() end
+        if PredictionDot then PredictionDot:Remove() end
     end)
     
     Cache = {
@@ -1249,13 +1242,13 @@ local function MainLoop()
         CacheSoldiers()
     end
     
-    if now - State.LastTeamScan > Tuning.TeamScanInterval then
-        State.LastTeamScan = now
-        if Window.Flags["ESP/TeamCheck"] then
-            ScanFriendlyIndicators()
-            UpdateFriendlyStatus()
-        else
-            -- When teamcheck is off, detect teammates
+    -- Always update team/friendly status every frame for better accuracy
+    if Window.Flags["ESP/TeamCheck"] then
+        ScanFriendlyIndicators()
+        UpdateFriendlyStatus()
+    else
+        if now - State.LastTeamScan > Tuning.TeamScanInterval then
+            State.LastTeamScan = now
             DetectTeammates()
         end
     end
@@ -1270,7 +1263,40 @@ local function MainLoop()
                 Cache.ConfirmedEnemies[model] = nil
                 Cache.EnemyConfirmations[model] = nil
                 Cache.LastFriendlyUpdate[model] = nil
+                Cache.WallCheckResults[model] = nil
                 RemoveChams(model)
+            end
+        end
+    end
+    
+    local localRoot = GetLocalRoot()
+    if localRoot and Window.Flags["ESP/WallCheck"] then
+        local myPos = localRoot.Position
+        for model in pairs(Cache.Soldiers) do
+            if not IsValidModel(model) then continue end
+            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
+            local root = GetRoot(model)
+            if root then
+                Cache.WallCheckResults[model] = CheckWallBetween(myPos, root.Position)
+            end
+        end
+    end
+    
+    Cache.ClosestEnemy = nil
+    if Window.Flags["ESP/ClosestEnemy"] and localRoot then
+        local myPos = localRoot.Position
+        local closestDist = math.huge
+        for model in pairs(Cache.Soldiers) do
+            if not IsValidModel(model) then continue end
+            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then continue end
+            if Window.Flags["ESP/TeamCheck"] and IsChecking(model) then continue end
+            local root = GetRoot(model)
+            if root then
+                local dist = (root.Position - myPos).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    Cache.ClosestEnemy = model
+                end
             end
         end
     end
@@ -1284,9 +1310,8 @@ local function MainLoop()
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
-            -- Skip friendlies (both when teamcheck is on or off)
-            if Cache.Friendlies[model] == true then
-                continue -- Skip confirmed friendlies/teammates
+            if Window.Flags["ESP/TeamCheck"] and Cache.Friendlies[model] == true then
+                continue
             end
             
             local root = GetRoot(model)
@@ -1408,13 +1433,11 @@ local function HandleInput(input, gameProcessed)
 end
 
 local function IsDeadlineGame()
-    -- Verify this is actually Deadline game
     local charactersFolder = Workspace:FindFirstChild("characters")
     if not charactersFolder then
         return false
     end
     
-    -- Additional verification: check if models have humanoid_root_part (Deadline-specific)
     local hasDeadlineStructure = false
     for _, child in pairs(charactersFolder:GetChildren()) do
         if child:IsA("Model") and child:FindFirstChild("humanoid_root_part") then
@@ -1427,7 +1450,6 @@ local function IsDeadlineGame()
 end
 
 local function Initialize()
-    -- Verify we're in the correct game before proceeding
     if not IsDeadlineGame() then
         warn("Deadline script loaded but game structure doesn't match. This might not be Deadline.")
         Parvus.Utilities.UI:Push({
@@ -1445,16 +1467,13 @@ local function Initialize()
         return
     end
     
-    -- Create Varus UI Window
     local Window = Parvus.Utilities.UI:Window({
         Name = "DEADLINE",
         Position = UDim2.new(0.5, -248, 0.5, -248)
     })
     
-    -- Store Window globally for access
     getgenv().Window = Window
     
-    -- ESP Tab
     local ESPTab = Window:Tab({Name = "ESP"}) do
         local ESPSettingsSection = ESPTab:Section({Name = "ESP Settings", Side = "Left"}) do
             ESPSettingsSection:Toggle({Name = "Enable ESP", Flag = "ESP/Enabled", Value = true})
@@ -1467,8 +1486,8 @@ local function Initialize()
             ESPSettingsSection:Toggle({Name = "Box Fill", Flag = "ESP/BoxFill", Value = false})
             ESPSettingsSection:Toggle({Name = "Name", Flag = "ESP/Name", Value = true})
             ESPSettingsSection:Toggle({Name = "Distance", Flag = "ESP/Distance", Value = true})
-            ESPSettingsSection:Toggle({Name = "Health Bar", Flag = "ESP/HealthBar", Value = false})
-            ESPSettingsSection:Toggle({Name = "Health Text", Flag = "ESP/HealthText", Value = true})
+            ESPSettingsSection:Toggle({Name = "Wall Check", Flag = "ESP/WallCheck", Value = false})
+            ESPSettingsSection:Toggle({Name = "Closest Enemy", Flag = "ESP/ClosestEnemy", Value = false})
             ESPSettingsSection:Toggle({Name = "Skeleton", Flag = "ESP/Skeleton", Value = false})
             ESPSettingsSection:Slider({Name = "Skeleton Thickness", Flag = "ESP/SkeletonThickness", Min = 1, Max = 5, Value = 1.5, Precise = 1})
             ESPSettingsSection:Slider({Name = "Max Distance", Flag = "ESP/MaxDistance", Min = 500, Max = 3000, Value = 500, Step = 50})
@@ -1479,7 +1498,6 @@ local function Initialize()
                 {Name = "Top", Mode = "Button"}
             }})
             ESPSettingsSection:Toggle({Name = "Team Check", Flag = "ESP/TeamCheck", Value = true, Callback = function(Bool)
-                -- Clear team cache when toggled
                 ClearTeamCache()
             end})
         end
@@ -1490,6 +1508,7 @@ local function Initialize()
             ColorSection:Colorpicker({Name = "Checking Color", Flag = "ESP/CheckingColor", Value = {0.588, 0.588, 0.588, 0, false}})
             ColorSection:Colorpicker({Name = "Tracer Color", Flag = "ESP/TracerColor", Value = {1, 0.549, 0.392, 0, false}})
             ColorSection:Colorpicker({Name = "Skeleton Color", Flag = "ESP/SkeletonColor", Value = {1, 1, 1, 0, false}})
+            ColorSection:Colorpicker({Name = "Box Fill Color", Flag = "ESP/BoxFillColor", Value = {1, 0.294, 0.333, 0.15, false}})
         end
         
         local ChamsSection = ESPTab:Section({Name = "Chams", Side = "Right"}) do
@@ -1502,13 +1521,13 @@ local function Initialize()
         end
     end
     
-    -- AIM Tab
     local AIMTab = Window:Tab({Name = "AIM"}) do
         local AimbotSection = AIMTab:Section({Name = "Aimbot Settings", Side = "Left"}) do
             AimbotSection:Toggle({Name = "Enable Aimbot", Flag = "AIM/Enabled", Value = false})
             AimbotSection:Toggle({Name = "Show FOV", Flag = "AIM/ShowFOV", Value = true})
             AimbotSection:Slider({Name = "FOV Size", Flag = "AIM/FOV", Min = 50, Max = 400, Value = 180, Step = 10})
             AimbotSection:Slider({Name = "Smoothness", Flag = "AIM/Smooth", Min = 0.05, Max = 0.5, Value = 0.18, Precise = 2})
+            AimbotSection:Slider({Name = "Camera FOV", Flag = "AIM/CameraFOV", Min = 70, Max = 120, Value = 70, Step = 1})
             AimbotSection:Dropdown({Name = "Target Part", Flag = "AIM/TargetPart", List = {
                 {Name = "Head", Mode = "Button", Value = true},
                 {Name = "Torso", Mode = "Button"},
@@ -1522,9 +1541,18 @@ local function Initialize()
                 {Name = "Pistol", Mode = "Button"}
             }})
         end
+        
+        local PredictionSection = AIMTab:Section({Name = "Prediction", Side = "Right"}) do
+            PredictionSection:Toggle({Name = "Show Prediction Dot", Flag = "AIM/PredictionDot", Value = true})
+            PredictionSection:Slider({Name = "Dot Size", Flag = "AIM/PredictionDotSize", Min = 2, Max = 15, Value = 5, Step = 1})
+            PredictionSection:Colorpicker({Name = "Dot Color", Flag = "AIM/PredictionDotColor", Value = {1, 1, 1, 0.3, false}})
+        end
+        
+        local FOVSection = AIMTab:Section({Name = "FOV Circle", Side = "Right"}) do
+            FOVSection:Colorpicker({Name = "FOV Color", Flag = "AIM/FOVColor", Value = {1, 0.294, 0.333, 0.7, false}})
+        end
     end
     
-    -- Options Tab
     local OptionsTab = Window:Tab({Name = "Options"}) do
         local MenuSection = OptionsTab:Section({Name = "Menu", Side = "Left"}) do
             local UIToggle = MenuSection:Toggle({Name = "UI Enabled", Flag = "UI/Enabled", IgnoreFlag = true,
@@ -1536,7 +1564,111 @@ local function Initialize()
                 end
             end})
         end
+        
+        local ConfigSection = OptionsTab:Section({Name = "Config", Side = "Right"}) do
+            local FolderName = "Varus/Deadline"
+            if not isfolder("Varus") then makefolder("Varus") end
+            if not isfolder(FolderName) then makefolder(FolderName) end
+            if not isfolder(FolderName .. "\\Configs") then makefolder(FolderName .. "\\Configs") end
+            
+            local function UpdateConfigList()
+                local configs = {}
+                for _, configFile in pairs(listfiles(FolderName .. "\\Configs") or {}) do
+                    local configName = configFile:gsub(FolderName .. "\\Configs\\", ""):gsub(".json", "")
+                    configs[#configs + 1] = {
+                        Name = configName,
+                        Mode = "Button"
+                    }
+                end
+                return configs
+            end
+            
+            local ConfigDropdown = ConfigSection:Dropdown({Name = "Config", Flag = "Config/Selected", List = UpdateConfigList()})
+            
+            ConfigSection:Button({Name = "Save", Callback = function()
+                local selected = Window.Flags["Config/Selected"]
+                if selected and selected[1] then
+                    Window:SaveConfig(FolderName, selected[1])
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "Select Config First",
+                        Duration = 3
+                    })
+                end
+            end})
+            
+            ConfigSection:Button({Name = "Load", Callback = function()
+                local selected = Window.Flags["Config/Selected"]
+                if selected and selected[1] then
+                    Window:LoadConfig(FolderName, selected[1])
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "Select Config First",
+                        Duration = 3
+                    })
+                end
+            end})
+            
+            ConfigSection:Button({Name = "Delete", Callback = function()
+                local selected = Window.Flags["Config/Selected"]
+                if selected and selected[1] then
+                    Window:DeleteConfig(FolderName, selected[1])
+                    ConfigDropdown:SetList(UpdateConfigList())
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "Select Config First",
+                        Duration = 3
+                    })
+                end
+            end})
+            
+            ConfigSection:Button({Name = "Refresh", Callback = function()
+                ConfigDropdown:SetList(UpdateConfigList())
+            end})
+            
+            local AutoLoadDivider = ConfigSection:Divider({Text = "AutoLoad Config"})
+            ConfigSection:Button({Name = "Set AutoLoad Config", Callback = function()
+                local selected = Window.Flags["Config/Selected"]
+                if selected and selected[1] then
+                    Window:AddToAutoLoad("Varus/Deadline", selected[1])
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "AutoLoad set to: " .. selected[1],
+                        Duration = 3
+                    })
+                else
+                    Parvus.Utilities.UI:Push({
+                        Title = "Config System",
+                        Description = "Select Config First",
+                        Duration = 3
+                    })
+                end
+            end})
+        end
     end
+    
+    local autoLoadConfig = Window:GetAutoLoadConfig("Varus/Deadline")
+    if autoLoadConfig then
+        Window:LoadConfig("Varus/Deadline", autoLoadConfig)
+    end
+    
+    local lastSaveTime = 0
+    local saveInterval = 5
+    Connections.AutoSave = RunService.Heartbeat:Connect(function()
+        local now = tick()
+        if now - lastSaveTime > saveInterval then
+            lastSaveTime = now
+            local autoLoadConfig = Window:GetAutoLoadConfig("Varus/Deadline")
+            if autoLoadConfig then
+                pcall(function()
+                    Window:SaveConfig("Varus/Deadline", autoLoadConfig)
+                end)
+            end
+        end
+    end)
     
     InitializeFPSOptimizer()
     
@@ -1551,6 +1683,22 @@ local function Initialize()
         Cache.ConfirmedEnemies = {}
         Cache.EnemyConfirmations = {}
         Cache.LastFriendlyUpdate = {}
+        Cache.WallCheckResults = {}
+        Cache.ClosestEnemy = nil
+        ResetPool()
+    end)
+    
+    Connections.CharacterRemoving = LocalPlayer.CharacterRemoving:Connect(function()
+        ClearAllChams()
+        Cache.Soldiers = {}
+        Cache.Friendlies = {}
+        Cache.FriendlyScores = {}
+        Cache.ConfirmedEnemies = {}
+        Cache.EnemyConfirmations = {}
+        Cache.LastFriendlyUpdate = {}
+        Cache.WallCheckResults = {}
+        Cache.ClosestEnemy = nil
+        ResetPool()
     end)
 end
 
