@@ -1435,7 +1435,7 @@ local function Initialize()
     end
     
     local Window = Parvus.Utilities.UI:Window({
-        Name = "DEADLINE",
+        Name = "Deadline - made by gws☦",
         Position = UDim2.new(0.5, -248, 0.5, -248)
     })
     
