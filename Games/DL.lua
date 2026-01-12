@@ -1310,7 +1310,7 @@ local function MainLoop()
         for model in pairs(Cache.Soldiers) do
             if not IsValidModel(model) then continue end
             
-            if Window.Flags["ESP/TeamCheck"] and Cache.Friendlies[model] == true then
+            if Window.Flags["ESP/TeamCheck"] and IsFriendly(model) then
                 continue
             end
             
